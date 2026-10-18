@@ -8,7 +8,14 @@ on:
       - main
     paths:
       - ".github/workflows/build-windows-complete.yml"
-      - "scripts/download_drive_file.py"
+      - "scripts/**"
+      - "core/**"
+      - "desktop/**"
+      - "tests/**"
+      - "installer/**"
+      - "requirements.txt"
+      - "requirements-desktop.txt"
+      - "requirements-voice-hq.txt"
   workflow_dispatch:
     inputs:
       presenter_adapter_url:
