@@ -41,7 +41,13 @@ class AGCNVoiceRuntime:
         voice_config: dict | None = None,
     ):
         self.store = store or ProductStore()
+        # Runtime/UI state is separate from Presenter state. The dashboard reads
+        # cached snapshots and never waits for an LLM generation.
         self.lock = threading.RLock()
+        self.presenter_lock = threading.RLock()
+        self.pending_comment_ingest = deque(maxlen=200)
+        self._presenter_snapshot_cache = {}
+        self._queue_snapshot_cache = []
 
         self.comments = deque(maxlen=30)
         self.comments_analyzed = 0
@@ -70,6 +76,9 @@ class AGCNVoiceRuntime:
         active = self.store.active_for_presenter() or {}
         self.presenter = self._new_presenter(active)
         self.product_signature = self._product_signature(active)
+        with self.presenter_lock:
+            self._presenter_snapshot_cache = self.presenter.snapshot()
+            self._queue_snapshot_cache = self.presenter.queue_snapshot()
 
         self.monitor = TikTokMonitor(
             event_callback=self._on_monitor_event
@@ -99,49 +108,42 @@ class AGCNVoiceRuntime:
         )
 
     def _sync_active_product_locked(self):
-        active = self.store.active_for_presenter() or {}
-        signature = self._product_signature(active)
-
-        if signature != self.product_signature:
-            previous_id = self.presenter.product.get("id")
-            active_id = active.get("id")
-
-            if previous_id == active_id:
-                self.presenter.set_product(active)
-            else:
-                self.presenter = self._new_presenter(active)
-                self.current_speech = None
-                self.current_speech_until = 0.0
-                self.last_decision = None
-                self.reactive_streak = 0
-                self.forced_product_start_at = 0.0
-                self.forced_product_until = 0.0
-
-            self.product_signature = signature
+        # Caller holds self.lock. Always acquire runtime.lock before presenter_lock.
+        with self.presenter_lock:
+            active = self.store.active_for_presenter() or {}
+            signature = self._product_signature(active)
+            if signature != self.product_signature:
+                previous_id = self.presenter.product.get("id")
+                active_id = active.get("id")
+                if previous_id == active_id:
+                    self.presenter.set_product(active)
+                else:
+                    self.presenter = self._new_presenter(active)
+                    self.current_speech = None
+                    self.current_speech_until = 0.0
+                    self.last_decision = None
+                    self.reactive_streak = 0
+                    self.forced_product_start_at = 0.0
+                    self.forced_product_until = 0.0
+                self.product_signature = signature
+                self._presenter_snapshot_cache = self.presenter.snapshot()
+                self._queue_snapshot_cache = self.presenter.queue_snapshot()
 
     def _on_monitor_event(self, event_type: str, payload: dict):
         if event_type != "comment":
             return
 
+        # Keep the TikTok event callback short: no Presenter/LLM work here.
+        # The background worker consumes this bounded queue in order.
         with self.lock:
-            self._sync_active_product_locked()
-
             item = {
                 "time": payload.get("time"),
                 "user": payload.get("user"),
                 "text": payload.get("text"),
             }
-
             self.comments.append(item)
             self.last_comment = item
-
-            analyzed = self.presenter.ingest_comment(
-                item["user"],
-                item["text"],
-            )
-
-            if analyzed:
-                self.comments_analyzed += 1
+            self.pending_comment_ingest.append(item)
 
     def add_product(self, payload: dict) -> dict:
         product = self.store.add(**(payload or {}))
@@ -193,22 +195,24 @@ class AGCNVoiceRuntime:
     ) -> dict:
         with self.lock:
             self._sync_active_product_locked()
-            if not self.presenter.product.get("name"):
-                return {
-                    "ok": False,
-                    "message": "Cadastre e ative um produto antes do teste.",
-                }
-            return self.presenter.test_comment(user, text)
+            with self.presenter_lock:
+                if not self.presenter.product.get("name"):
+                    return {
+                        "ok": False,
+                        "message": "Cadastre e ative um produto antes do teste.",
+                    }
+                return self.presenter.test_comment(user, text)
 
     def test_presenter_proactive(self) -> dict:
         with self.lock:
             self._sync_active_product_locked()
-            if not self.presenter.product.get("name"):
-                return {
-                    "ok": False,
-                    "message": "Cadastre e ative um produto antes do teste.",
-                }
-            return self.presenter.test_proactive()
+            with self.presenter_lock:
+                if not self.presenter.product.get("name"):
+                    return {
+                        "ok": False,
+                        "message": "Cadastre e ative um produto antes do teste.",
+                    }
+                return self.presenter.test_proactive()
 
     def _ensure_presenter_worker(self) -> None:
         if self.presenter_thread and self.presenter_thread.is_alive():
@@ -263,8 +267,11 @@ class AGCNVoiceRuntime:
         with self.lock:
             active = self.store.active_for_presenter() or {}
             self.brain_provider = None
-            self.presenter = PresenterV2(active)
-            self.product_signature = self._product_signature(active)
+            with self.presenter_lock:
+                self.presenter = PresenterV2(active)
+                self.product_signature = self._product_signature(active)
+                self._presenter_snapshot_cache = self.presenter.snapshot()
+                self._queue_snapshot_cache = self.presenter.queue_snapshot()
             self.current_speech = None
             self.current_speech_until = 0.0
             self.last_decision = None
@@ -424,109 +431,109 @@ class AGCNVoiceRuntime:
         return None
 
     def _tick_presenter_unlocked(self):
+        # Capture short-lived runtime state. Never hold self.lock during LLM/TTS.
         with self.lock:
             self._sync_active_product_locked()
-
             monitor_state = self.monitor.snapshot()
             if not (
                 monitor_state.get("monitoring")
                 and monitor_state.get("status") == "ativo"
             ):
                 return
-
             now = time.time()
             product_window = self._product_window_active(now)
             comments_locked = bool(self.forced_product_until)
             presenter = self.presenter
+            pending_comments = list(self.pending_comment_ingest)
+            self.pending_comment_ingest.clear()
 
-        # UNLOCKED GENERATION SEGMENT
-        # We process comments and maybe proactive generation without locking the UI.
-        # Note: If `_on_monitor_event` fires, it accesses `presenter` concurrently, but python appends are thread-safe,
-        # and we assume `presenter` queues tolerate concurrent additions.
-        if comments_locked:
-            collect = getattr(
-                presenter,
-                "collect_pending_comments",
-                None,
-            )
-            if callable(collect):
-                collect()
-            created = []
-        else:
-            created = presenter.process_pending_comments()
+        # Serialize all live Presenter mutations. New TikTok events only append
+        # to pending_comment_ingest and therefore never race heapq/fusion/memory.
+        analyzed_count = 0
+        with self.presenter_lock:
+            for comment in pending_comments:
+                analyzed = presenter.ingest_comment(
+                    comment.get("user") or "",
+                    comment.get("text") or "",
+                )
+                if analyzed:
+                    analyzed_count += 1
+            if comments_locked:
+                collect = getattr(presenter, "collect_pending_comments", None)
+                if callable(collect):
+                    collect()
+                created = []
+            else:
+                created = presenter.process_pending_comments()
+            queue = presenter.queue_snapshot()
+            presenter_state = presenter.snapshot()
 
+        # The UI uses immutable-ish cached copies and doesn't wait for generation.
         with self.lock:
             if presenter is not self.presenter:
-                return # product changed during generation!
-
+                return
+            self.comments_analyzed += analyzed_count
             if created:
                 self.items_queued += len(created)
-
-            queue = self.presenter.queue_snapshot()
-
+            self._presenter_snapshot_cache = presenter_state
+            self._queue_snapshot_cache = queue
             now = time.time()
             if self.current_speech and now < self.current_speech_until:
                 if product_window or self.reactive_streak >= self.MAX_REACTIVE_BURST:
                     return
-
                 if (
                     queue
                     and queue[0].get("priority", 0) >= self.REACTIVE_INTERRUPT_PRIORITY
                     and (
                         self.current_speech.get("type") == "proactive"
-                        or queue[0].get("priority", 0) > self.current_speech.get("priority", 0)
+                        or queue[0].get("priority", 0)
+                        > self.current_speech.get("priority", 0)
                     )
                 ):
                     self.current_speech_until = 0.0
                     self.interruptions += 1
                 else:
                     return
-
             self.current_speech = None
 
-        # Re-evaluating unlocked
-        if product_window:
-            item = self._forced_proactive()
-        else:
-            proactive = presenter.maybe_proactive()
-            item = presenter.next_speech()
+        # Brain/TTS planning happens outside the UI lock, but inside presenter_lock
+        # so concurrent event callbacks cannot mutate the same Presenter structures.
+        proactive = None
+        with self.presenter_lock:
+            if product_window:
+                item = self._forced_proactive()
+            else:
+                proactive = presenter.maybe_proactive()
+                item = presenter.next_speech()
+            queue = presenter.queue_snapshot()
+            presenter_state = presenter.snapshot()
 
         with self.lock:
             if presenter is not self.presenter:
                 return
-
+            self._presenter_snapshot_cache = presenter_state
+            self._queue_snapshot_cache = queue
             if product_window:
                 if item:
                     self.proactive_generated += 1
-            else:
-                if proactive:
-                    self.proactive_generated += 1
-                    self.items_queued += 1
-
+            elif proactive:
+                self.proactive_generated += 1
+                self.items_queued += 1
             if not item:
                 return
-
             self.current_speech = item
             self.speeches_generated += 1
-
             if item.get("type") == "reactive":
                 self.last_decision = item
                 self.reactive_streak += 1
             elif not product_window:
                 self.reactive_streak = 0
-
             try:
                 self._queue_voice(item)
             except Exception as exc:
                 item["voice_error"] = str(exc)
-
-            duration = min(
-                12.0,
-                max(2.5, len(item["speech"]) / 16.0),
-            )
-            now = time.time()
-            self.current_speech_until = now + duration
-
+            duration = min(12.0, max(2.5, len(item.get("speech") or "") / 16.0))
+            self.current_speech_until = time.time() + duration
             if (
                 item.get("type") == "reactive"
                 and self.reactive_streak >= self.MAX_REACTIVE_BURST
@@ -547,7 +554,8 @@ class AGCNVoiceRuntime:
         with self.lock:
             live = self.monitor.snapshot()
             active = self.store.active() or {}
-            presenter_state = self.presenter.snapshot()
+            presenter_state = dict(self._presenter_snapshot_cache)
+            queue_snapshot = list(self._queue_snapshot_cache)
             voice_state = (
                 self.voice_service.snapshot()
                 if self.voice_service is not None
@@ -611,7 +619,7 @@ class AGCNVoiceRuntime:
                 ),
                 "queue": [
                     dict(item)
-                    for item in self.presenter.queue_snapshot()
+                    for item in queue_snapshot
                 ],
                 "current_speech": (
                     dict(self.current_speech)
