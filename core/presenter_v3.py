@@ -409,9 +409,13 @@ class PresenterV3:
         # Um erro de classificação do modelo não pode silenciar o fluxo
         # proativo. O fallback usa somente os fatos aprovados pelo SalesGuard.
         if result.needs_fact:
-            if plan.get("type") == "proactive":
-                return self._fallback_item(plan, "Brain marcou fala proativa como dependente de fato")
-            return None
+            # O plano já passou pela checagem de fatos do Presenter. Se o
+            # modelo pedir fato novamente, usa a resposta segura do Presenter
+            # determinístico em vez de perder um comentário que era respondível.
+            return self._fallback_item(
+                plan,
+                "Brain marcou uma fala respondível como dependente de fato",
+            )
 
         speech = str(result.speech or "").strip()
         if not speech:
