@@ -1596,39 +1596,74 @@ class TestPage(QWidget):
                 voice.start()
             except Exception as exc:
                 self.events.put(("voice_error", str(exc)))
+
         cycle = 0
         while not self.stop_event.is_set():
-            comment = random.choice(self.COMMENTS)
+            # Começa com uma apresentação espontânea e intercala pitches
+            # com comentários para verificar os dois caminhos de conversa.
+            proactive_turn = cycle % 3 == 0
             user = "cliente_" + str(random.randint(10, 999))
+            comment = random.choice(self.COMMENTS)
             started = time.monotonic()
-            self.events.put(("comment", (user, comment)))
+
             try:
-                result = self.controller.test_presenter(comment=comment, user=user)
-                elapsed = time.monotonic() - started
+                if proactive_turn:
+                    result = self.controller.test_presenter()
+                else:
+                    self.events.put(("comment", (user, comment)))
+                    result = self.controller.test_presenter(
+                        comment=comment,
+                        user=user,
+                    )
+
                 item = result.get("speech") if isinstance(result, dict) else None
                 speech = str(item.get("speech") or "").strip() if isinstance(item, dict) else ""
-                if not speech and cycle % 3 == 2:
-                    proactive = self.controller.test_presenter()
-                    item = proactive.get("speech") if isinstance(proactive, dict) else None
+
+                # Se o comentário não puder ser respondido com segurança
+                # (por exemplo, faltou um fato cadastrado), a live continua
+                # vendendo o produto em vez de ficar em silêncio.
+                if not speech and not proactive_turn:
+                    result = self.controller.test_presenter()
+                    item = result.get("speech") if isinstance(result, dict) else None
                     speech = str(item.get("speech") or "").strip() if isinstance(item, dict) else ""
+
+                elapsed = time.monotonic() - started
                 if speech:
                     queued = False
                     if voice is not None:
                         try:
-                            voice.enqueue(speech, priority=40, metadata={"type": "proactive", "topic": "test", "tactic": "test", "voice_style": "sales_energy", "test_mode": True})
+                            item_type = str(item.get("type") or ("proactive" if proactive_turn else "reactive"))
+                            voice.enqueue(
+                                speech,
+                                priority=int(item.get("priority") or (35 if item_type == "proactive" else 45)),
+                                metadata={
+                                    "type": item_type,
+                                    "topic": item.get("topic") or "test",
+                                    "tactic": item.get("tactic") or "test",
+                                    "voice_style": item.get("voice_style") or "sales_energy",
+                                    "test_mode": True,
+                                },
+                            )
                             queued = True
                         except Exception as exc:
                             self.events.put(("voice_error", str(exc)))
                     self.events.put(("answer", (speech, elapsed, queued)))
                 else:
-                    self.events.put(("ignored", (result.get("brain_error") or "A IA não gerou resposta para esta mensagem.", elapsed)))
+                    reason = (
+                        result.get("brain_error")
+                        or result.get("message")
+                        or "A IA não gerou uma fala; confira os fatos cadastrados no produto."
+                    ) if isinstance(result, dict) else "A IA não gerou uma fala."
+                    self.events.put(("ignored", (reason, elapsed)))
             except Exception as exc:
                 self.events.put(("error", str(exc)))
+
             cycle += 1
             self.viewers = max(0, min(250, self.viewers + random.randint(-5, 8)))
             self.events.put(("viewers", self.viewers))
             if self.stop_event.wait(4.0):
                 break
+
         self.events.put(("finished", None))
 
     def drain_events(self):
