@@ -75,3 +75,61 @@ def test_proactive_uses_registered_product_as_source_of_truth():
     assert context.mode == "proactive"
     assert context.product["name"] == "Smart Band X"
     assert "benefícios: Tela nítida e bateria duradoura" in context.allowed_facts
+
+
+
+class FailingBrain:
+    name = "failing-brain"
+
+    def healthcheck(self):
+        return True, "ok"
+
+    def generate(self, context):
+        raise RuntimeError("local Brain generation failed")
+
+
+class IncompleteBrain:
+    name = "incomplete-brain"
+
+    def healthcheck(self):
+        return True, "ok"
+
+    def generate(self, context):
+        return BrainResult(
+            speech="Olha só a bateria",
+            topic=context.planner_topic,
+            used_facts=[],
+            needs_fact=False,
+        )
+
+
+def test_proactive_still_speaks_when_brain_generation_fails():
+    presenter = PresenterV3(product(), FailingBrain())
+
+    result = presenter.test_proactive()
+
+    assert result["ok"] is True
+    assert result["speech"]["speech"].strip()[-1] in ".!?…"
+    assert result["speech"]["brain"] == "fallback determinístico"
+    assert "failed" in result["speech"]["fallback_reason"]
+
+
+def test_incomplete_brain_speech_is_replaced_by_complete_fallback():
+    presenter = PresenterV3(product(), IncompleteBrain())
+
+    result = presenter.test_proactive()
+
+    assert result["ok"] is True
+    assert result["speech"]["speech"].strip()[-1] in ".!?…"
+    assert result["speech"]["brain"] == "fallback determinístico"
+    assert "encerramento" in result["speech"]["fallback_reason"]
+
+
+def test_comment_with_known_fact_uses_fallback_when_brain_fails():
+    presenter = PresenterV3(product(), FailingBrain())
+
+    result = presenter.test_comment("Maria", "quanto custa?")
+
+    assert result["ok"] is True
+    assert result["speech"]["speech"]
+    assert result["speech"]["brain"] == "fallback determinístico"
