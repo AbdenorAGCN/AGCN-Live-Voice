@@ -127,3 +127,37 @@ def test_brain_preflight_degrades_to_deterministic_presenter(tmp_path):
 
     assert runtime.speeches_generated >= 1
     runtime.close()
+
+
+def test_monitor_callback_only_queues_comment_for_worker(tmp_path):
+    runtime = AGCNVoiceRuntime(make_store(tmp_path), brain_provider=FakeBrain())
+    runtime.presenter.ingest_comment = lambda *_args: (_ for _ in ()).throw(
+        AssertionError("monitor callback must not mutate Presenter")
+    )
+
+    runtime._on_monitor_event(
+        "comment",
+        {"time": 1, "user": "viewer", "text": "Qual o benefício?"},
+    )
+
+    assert len(runtime.pending_comment_ingest) == 1
+    assert runtime.snapshot()["last_comment"]["user"] == "viewer"
+    runtime.close()
+
+
+def test_snapshot_does_not_wait_for_presenter_generation_lock(tmp_path):
+    import threading
+
+    runtime = AGCNVoiceRuntime(make_store(tmp_path), brain_provider=FakeBrain())
+    runtime.monitor = FakeMonitor(active=True)
+    result = []
+    runtime.presenter_lock.acquire()
+    try:
+        worker = threading.Thread(target=lambda: result.append(runtime.snapshot()))
+        worker.start()
+        worker.join(timeout=1.0)
+        assert not worker.is_alive(), "dashboard snapshot waited for Presenter lock"
+        assert result and result[0]["status"] == "ativo"
+    finally:
+        runtime.presenter_lock.release()
+        runtime.close()
