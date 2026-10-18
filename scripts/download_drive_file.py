@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Download a public Google Drive file or a direct HTTP(S) URL safely.
 
-The resulting file is validated as a safetensors file before the build continues.
+Google Drive sometimes serves a confirmation form instead of the file. This
+helper follows that form, then validates the resulting safetensors header.
 """
 from __future__ import annotations
 
@@ -10,10 +11,35 @@ import re
 import shutil
 import sys
 import tempfile
+from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
+
+
+class DownloadFormParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.forms: list[tuple[str, dict[str, str]]] = []
+        self._action: str | None = None
+        self._fields: dict[str, str] = {}
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        values = dict(attrs)
+        if tag.lower() == "form":
+            self._action = values.get("action", "")
+            self._fields = {}
+        elif tag.lower() == "input" and self._action is not None:
+            name = values.get("name")
+            if name:
+                self._fields[name] = values.get("value", "")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "form" and self._action is not None:
+            self.forms.append((self._action, dict(self._fields)))
+            self._action = None
+            self._fields = {}
 
 
 def drive_file_id(url: str) -> str | None:
@@ -27,38 +53,92 @@ def drive_file_id(url: str) -> str | None:
     return query_id if query_id and re.fullmatch(r"[A-Za-z0-9_-]+", query_id) else None
 
 
+def save_response(response: requests.Response, destination: Path) -> None:
+    response.raise_for_status()
+    with destination.open("wb") as output:
+        for chunk in response.iter_content(chunk_size=8 * 1024 * 1024):
+            if chunk:
+                output.write(chunk)
+
+
+def response_looks_html(response: requests.Response, prefix: bytes) -> bool:
+    content_type = response.headers.get("Content-Type", "").lower()
+    return "text/html" in content_type or prefix.lstrip().lower().startswith(
+        (b"<!doctype html", b"<html", b"<form")
+    )
+
+
 def download_drive(session: requests.Session, file_id: str, destination: Path) -> None:
     endpoint = "https://drive.google.com/uc"
-    response = session.get(endpoint, params={"export": "download", "id": file_id}, stream=True, timeout=(30, 180))
+    response = session.get(
+        endpoint,
+        params={"export": "download", "id": file_id},
+        stream=True,
+        timeout=(30, 180),
+    )
     response.raise_for_status()
+    first = next(response.iter_content(chunk_size=1024 * 1024), b"")
 
-    token = None
-    for cookie_name, cookie_value in response.cookies.items():
-        if cookie_name.startswith("download_warning"):
-            token = cookie_value
-            break
-
-    if not token:
-        # Google sometimes renders a confirmation page instead of setting a cookie.
-        prefix = response.raw.read(1024 * 1024, decode_content=True)
-        match = re.search(rb"[?&]confirm=([0-9A-Za-z_-]+)", prefix)
-        if match:
-            token = match.group(1).decode("ascii")
+    if not response_looks_html(response, first):
+        with destination.open("wb") as output:
+            if first:
+                output.write(first)
+            for chunk in response.iter_content(chunk_size=8 * 1024 * 1024):
+                if chunk:
+                    output.write(chunk)
         response.close()
-        if token:
-            response = session.get(
-                endpoint,
-                params={"export": "download", "id": file_id, "confirm": token},
-                stream=True,
-                timeout=(30, 180),
-            )
-            response.raise_for_status()
-        else:
-            # If the first response was already the file, save the consumed prefix too.
-            response = session.get(endpoint, params={"export": "download", "id": file_id}, stream=True, timeout=(30, 180))
-            response.raise_for_status()
+        return
 
+    # The response is a Drive confirmation page; read only the small HTML page.
+    chunks = [first]
+    total = len(first)
+    for chunk in response.iter_content(chunk_size=256 * 1024):
+        chunks.append(chunk)
+        total += len(chunk)
+        if total >= 4 * 1024 * 1024:
+            break
+    html = b"".join(chunks).decode("utf-8", errors="replace")
+    response.close()
+
+    parser = DownloadFormParser()
+    parser.feed(html)
+    if not parser.forms:
+        raise ValueError(
+            "Google Drive returned an HTML page instead of the model file. "
+            "Verify that General access is 'Anyone with the link' and that the link opens without signing in."
+        )
+
+    # Prefer the form that carries a file id and download/export fields.
+    forms = sorted(
+        parser.forms,
+        key=lambda form: (
+            0 if form[1].get("id") == file_id else 1,
+            0 if "download" in form[0].lower() else 1,
+        ),
+    )
+    action, fields = forms[0]
+    if "id" not in fields:
+        fields["id"] = file_id
+    if "export" not in fields:
+        fields["export"] = "download"
+    action_url = urljoin("https://drive.google.com", action)
+    response = session.get(
+        action_url,
+        params=fields,
+        stream=True,
+        timeout=(30, 180),
+    )
+    response.raise_for_status()
+    first = next(response.iter_content(chunk_size=1024 * 1024), b"")
+    if response_looks_html(response, first):
+        response.close()
+        raise ValueError(
+            "Google Drive still returned a confirmation/login page. "
+            "Verify sharing permissions and that the file is downloadable without signing in."
+        )
     with destination.open("wb") as output:
+        if first:
+            output.write(first)
         for chunk in response.iter_content(chunk_size=8 * 1024 * 1024):
             if chunk:
                 output.write(chunk)
@@ -68,7 +148,12 @@ def download_drive(session: requests.Session, file_id: str, destination: Path) -
 def download_direct(session: requests.Session, url: str, destination: Path) -> None:
     with session.get(url, stream=True, timeout=(30, 180)) as response:
         response.raise_for_status()
+        first = next(response.iter_content(chunk_size=1024 * 1024), b"")
+        if response_looks_html(response, first):
+            raise ValueError("The supplied direct URL returned HTML instead of the model file.")
         with destination.open("wb") as output:
+            if first:
+                output.write(first)
             for chunk in response.iter_content(chunk_size=8 * 1024 * 1024):
                 if chunk:
                     output.write(chunk)
@@ -81,13 +166,18 @@ def validate_safetensors(path: Path) -> None:
     with path.open("rb") as stream:
         header_size = int.from_bytes(stream.read(8), "little", signed=False)
         if header_size < 2 or header_size > min(size - 8, 100 * 1024 * 1024):
-            raise ValueError("Downloaded content does not have a valid safetensors header; check the Drive permissions/link.")
+            with path.open("rb") as retry:
+                preview = retry.read(160).decode("utf-8", errors="replace")
+            raise ValueError(
+                "Downloaded content does not have a valid safetensors header. "
+                f"File size: {size} bytes; preview: {preview!r}"
+            )
         header = stream.read(header_size)
     try:
         metadata = json.loads(header)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("Downloaded content is not a valid safetensors header (possibly a Google Drive HTML page).") from exc
-    if not isinstance(metadata, dict) or "__metadata__" not in metadata and not metadata:
+        raise ValueError("Downloaded content is not a valid safetensors header.") from exc
+    if not isinstance(metadata, dict) or not metadata:
         raise ValueError("Downloaded safetensors header is empty or malformed.")
 
 
