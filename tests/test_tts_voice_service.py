@@ -157,4 +157,5 @@ def test_voice_service_can_interrupt_current_proactive_audio():
     service.queue.get_nowait()
 
     assert service.interrupt_proactive() is True
-    assert sink.stop_calls == 1
+    # Prioriza o comentário, mas deixa a fala já iniciada terminar inteira.
+    assert sink.stop_calls == 0
