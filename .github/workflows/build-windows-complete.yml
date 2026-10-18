@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       presenter_adapter_url:
-        description: "Temporary authenticated download URL for adapter_model.safetensors"
+        description: "Cole a URL direta temporária e ainda válida do arquivo adapter_model.safetensors. Não cole esta descrição: é necessário o link real de download; links temporários expiram."
         required: true
         type: string
 
@@ -34,7 +34,13 @@ jobs:
         run: |
           python -m pip install safetensors numpy
           $adapterUrl = '${{ inputs.presenter_adapter_url }}'
+          if ([string]::IsNullOrWhiteSpace($adapterUrl) -or $adapterUrl -notmatch '^https?://') {
+            throw "Informe em Run workflow a URL HTTP/HTTPS direta e válida do adapter_model.safetensors. A descrição do campo não é uma URL."
+          }
           curl.exe -L --fail --retry 3 "$adapterUrl" -o "adapter_model.safetensors"
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path "adapter_model.safetensors")) {
+            throw "Não foi possível baixar o adapter. Gere um novo link autenticado; links temporários antigos podem ter expirado."
+          }
           $sourceHash = (Get-FileHash -Algorithm SHA256 "adapter_model.safetensors").Hash.ToLower()
           if ($sourceHash -ne "5652197ef5f1bc212822d071ed28cd5a9802fea62aa3f5f802e88896486a6524") { throw "Presenter adapter SHA256 mismatch: $sourceHash" }
           python scripts\convert_agcn_presenter_v01_to_gguf.py "adapter_model.safetensors" --output "brain_local\models\AGCN-Presenter-v0.1-F16.gguf"
