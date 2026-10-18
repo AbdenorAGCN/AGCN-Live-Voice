@@ -1509,6 +1509,7 @@ class TestPage(QWidget):
         self.m_speech = self.metric(grid, "Falas na fila de voz", "0", 1, 0)
         self.m_latency = self.metric(grid, "Tempo de geração", "—", 1, 1)
         self.m_voice = self.metric(grid, "Motor de voz", "Aguardando", 1, 2)
+        self.m_speed = self.metric(grid, "Velocidade configurada", "—", 2, 0)
         root.addLayout(grid)
         actions = QHBoxLayout()
         self.start_btn = QPushButton("▶  Iniciar teste")
@@ -1669,6 +1670,8 @@ class TestPage(QWidget):
         self.m_answers.setText(str(self.answers_count))
         self.m_speech.setText(str(self.speech_count))
         self.m_latency.setText((str(round(self.latency, 2)) + " s") if self.latency is not None else "—")
+        tts = self.controller.config.get("tts") or {}
+        self.m_speed.setText(str(tts.get("speed") or 1.28) + "×")
 
     def add_log(self, who, message):
         self.log.insertItem(0, time.strftime("%H:%M:%S") + " · " + str(who) + ": " + str(message))
