@@ -432,6 +432,19 @@ class AGCNVoiceRuntime:
 
     def _tick_presenter_unlocked(self):
         # Capture short-lived runtime state. Never hold self.lock during LLM/TTS.
+        # Defer generation while TTS is synthesizing/playing or has queued audio:
+        # this keeps the voice queue short and avoids stale pitches piling up.
+        voice_busy = False
+        if self.voice_service is not None:
+            try:
+                voice_state = self.voice_service.snapshot()
+                voice_busy = bool(
+                    voice_state.get("current")
+                    or int(voice_state.get("queued") or 0) > 0
+                )
+            except Exception:
+                voice_busy = False
+
         with self.lock:
             self._sync_active_product_locked()
             monitor_state = self.monitor.snapshot()
@@ -458,7 +471,7 @@ class AGCNVoiceRuntime:
                 )
                 if analyzed:
                     analyzed_count += 1
-            if comments_locked:
+            if comments_locked or voice_busy:
                 collect = getattr(presenter, "collect_pending_comments", None)
                 if callable(collect):
                     collect()
@@ -477,6 +490,11 @@ class AGCNVoiceRuntime:
                 self.items_queued += len(created)
             self._presenter_snapshot_cache = presenter_state
             self._queue_snapshot_cache = queue
+            # Let the active audio finish before planning another speech. New
+            # comments have already been collected into the bounded Presenter
+            # queue above, so no comment event is lost while the voice is busy.
+            if voice_busy:
+                return
             now = time.time()
             if self.current_speech and now < self.current_speech_until:
                 if product_window or self.reactive_streak >= self.MAX_REACTIVE_BURST:
