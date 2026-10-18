@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import re
+import queue
+import random
+import threading
+import time
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
@@ -1467,6 +1471,211 @@ class VoiceAudioPage(QWidget):
             QMessageBox.critical(self, "Teste de voz", str(exc))
 
 
+
+class TestPage(QWidget):
+    COMMENTS = ["Qual é o preço?", "Como funciona?", "Quais são os benefícios?", "Tem mais detalhes?", "Como eu uso?", "O que vem na embalagem?", "Vale a pena comprar?", "Acabei de chegar, me conta mais!"]
+
+    def __init__(self, controller):
+        super().__init__()
+        self.controller = controller
+        self.stop_event = threading.Event()
+        self.events = queue.Queue()
+        self.worker = None
+        self.viewers = 0
+        self.comments_count = 0
+        self.answers_count = 0
+        self.speech_count = 0
+        self.latency = None
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 22, 24, 24)
+        root.setSpacing(14)
+        title, desc = heading("Teste", "Simule uma sessão antes da LIVE real: comentários fictícios, respostas da IA e teste do motor de voz.")
+        root.addWidget(title)
+        root.addWidget(desc)
+        note = QLabel("Modo simulado: comentários e espectadores são fictícios; nada é enviado ao TikTok.")
+        note.setObjectName("InfoBanner")
+        note.setWordWrap(True)
+        root.addWidget(note)
+        product_card, product_layout = card("Produto ativo", "O Presenter usa o cadastro ativo na aba Produto.")
+        self.product = QLabel()
+        self.product.setObjectName("ValueStrong")
+        self.product.setWordWrap(True)
+        product_layout.addWidget(self.product)
+        root.addWidget(product_card)
+        grid = QGridLayout()
+        self.m_viewers = self.metric(grid, "Espectadores simulados", "0", 0, 0)
+        self.m_comments = self.metric(grid, "Comentários gerados", "0", 0, 1)
+        self.m_answers = self.metric(grid, "Respostas da IA", "0", 0, 2)
+        self.m_speech = self.metric(grid, "Falas na fila de voz", "0", 1, 0)
+        self.m_latency = self.metric(grid, "Tempo de geração", "—", 1, 1)
+        self.m_voice = self.metric(grid, "Motor de voz", "Aguardando", 1, 2)
+        root.addLayout(grid)
+        actions = QHBoxLayout()
+        self.start_btn = QPushButton("▶  Iniciar teste")
+        apply_primary(self.start_btn)
+        self.stop_btn = QPushButton("■  Encerrar teste")
+        apply_danger(self.stop_btn)
+        self.stop_btn.setEnabled(False)
+        self.status = QLabel("Teste parado")
+        self.status.setObjectName("StatusInfo")
+        actions.addWidget(self.start_btn)
+        actions.addWidget(self.stop_btn)
+        actions.addWidget(self.status, 1)
+        root.addLayout(actions)
+        log_card, log_layout = card("Atividade da IA", "Comentários simulados e falas produzidas.")
+        self.log = QListWidget()
+        self.log.setObjectName("DataList")
+        self.log.setMinimumHeight(200)
+        log_layout.addWidget(self.log)
+        root.addWidget(log_card, 1)
+        self.start_btn.clicked.connect(self.start_test)
+        self.stop_btn.clicked.connect(self.stop_test)
+        self.poll = QTimer(self)
+        self.poll.setInterval(250)
+        self.poll.timeout.connect(self.drain_events)
+        self.poll.start()
+        self.reload_product()
+
+    @staticmethod
+    def metric(grid, label, value, row, col):
+        frame, output = metric_block(label, value)
+        grid.addWidget(frame, row, col)
+        return output
+
+    def reload_product(self):
+        p = self.controller.active_product() or {}
+        details = [str(p.get("name") or "Nenhum produto ativo")]
+        if p.get("current_price") is not None:
+            details.append("Preço: R$ " + str(p.get("current_price")))
+        if p.get("description"):
+            details.append(str(p.get("description")))
+        benefits = p.get("benefits")
+        if benefits:
+            details.append("Benefícios: " + (", ".join(map(str, benefits)) if isinstance(benefits, list) else str(benefits)))
+        self.product.setText(" · ".join(details))
+        self.start_btn.setEnabled(bool(p.get("name")) and not (self.worker and self.worker.is_alive()))
+
+    def start_test(self):
+        if self.worker and self.worker.is_alive():
+            return
+        if self.controller.snapshot().get("monitoring"):
+            QMessageBox.warning(self, "Teste indisponível", "Encerre o monitoramento da LIVE real antes de iniciar a simulação.")
+            return
+        if not (self.controller.active_product() or {}).get("name"):
+            QMessageBox.warning(self, "Produto necessário", "Cadastre e ative um produto antes de testar.")
+            return
+        self.stop_event.clear()
+        self.viewers = random.randint(8, 46)
+        self.comments_count = self.answers_count = self.speech_count = 0
+        self.latency = None
+        self.log.clear()
+        self.update_metrics()
+        self.status.setText("Simulação em andamento")
+        self.start_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+        self.add_log("Sistema", "Teste iniciado usando o produto ativo.")
+        self.worker = threading.Thread(target=self.simulate, daemon=True, name="agcn-test-simulation")
+        self.worker.start()
+
+    def stop_test(self):
+        self.stop_event.set()
+        try:
+            if self.controller.runtime.voice_service is not None:
+                self.controller.runtime.voice_service.clear_pending()
+        except Exception:
+            pass
+        self.status.setText("Teste parado")
+        self.stop_btn.setEnabled(False)
+        self.start_btn.setEnabled(bool((self.controller.active_product() or {}).get("name")))
+
+    def simulate(self):
+        voice = self.controller.runtime.voice_service
+        if voice is not None:
+            try:
+                voice.start()
+            except Exception as exc:
+                self.events.put(("voice_error", str(exc)))
+        cycle = 0
+        while not self.stop_event.is_set():
+            comment = random.choice(self.COMMENTS)
+            user = "cliente_" + str(random.randint(10, 999))
+            started = time.monotonic()
+            self.events.put(("comment", (user, comment)))
+            try:
+                result = self.controller.test_presenter(comment=comment, user=user)
+                elapsed = time.monotonic() - started
+                item = result.get("speech") if isinstance(result, dict) else None
+                speech = str(item.get("speech") or "").strip() if isinstance(item, dict) else ""
+                if not speech and cycle % 3 == 2:
+                    proactive = self.controller.test_presenter()
+                    item = proactive.get("speech") if isinstance(proactive, dict) else None
+                    speech = str(item.get("speech") or "").strip() if isinstance(item, dict) else ""
+                if speech:
+                    queued = False
+                    if voice is not None:
+                        try:
+                            voice.enqueue(speech, priority=40, metadata={"type": "proactive", "topic": "test", "tactic": "test", "voice_style": "sales_energy", "test_mode": True})
+                            queued = True
+                        except Exception as exc:
+                            self.events.put(("voice_error", str(exc)))
+                    self.events.put(("answer", (speech, elapsed, queued)))
+                else:
+                    self.events.put(("ignored", (result.get("brain_error") or "A IA não gerou resposta para esta mensagem.", elapsed)))
+            except Exception as exc:
+                self.events.put(("error", str(exc)))
+            cycle += 1
+            self.viewers = max(0, min(250, self.viewers + random.randint(-5, 8)))
+            self.events.put(("viewers", self.viewers))
+            if self.stop_event.wait(4.0):
+                break
+        self.events.put(("finished", None))
+
+    def drain_events(self):
+        while True:
+            try:
+                kind, value = self.events.get_nowait()
+            except queue.Empty:
+                break
+            if kind == "comment":
+                self.comments_count += 1
+                self.add_log(value[0], "Comentário simulado: “" + value[1] + "”")
+            elif kind == "answer":
+                self.answers_count += 1
+                speech, elapsed, queued = value
+                self.latency = elapsed
+                if queued:
+                    self.speech_count += 1
+                    self.m_voice.setText("Fila de voz ativa")
+                self.add_log("IA", speech)
+            elif kind == "ignored":
+                self.latency = value[1]
+                self.add_log("IA", "Sem resposta: " + str(value[0]))
+            elif kind == "viewers":
+                self.viewers = int(value)
+            elif kind == "voice_error":
+                self.m_voice.setText("Erro na voz")
+                self.add_log("Voz", str(value))
+            elif kind == "error":
+                self.add_log("Erro", str(value))
+            elif kind == "finished":
+                self.status.setText("Teste parado")
+                self.stop_btn.setEnabled(False)
+                self.start_btn.setEnabled(bool((self.controller.active_product() or {}).get("name")))
+            self.update_metrics()
+
+    def update_metrics(self):
+        self.m_viewers.setText(str(self.viewers))
+        self.m_comments.setText(str(self.comments_count))
+        self.m_answers.setText(str(self.answers_count))
+        self.m_speech.setText(str(self.speech_count))
+        self.m_latency.setText((str(round(self.latency, 2)) + " s") if self.latency is not None else "—")
+
+    def add_log(self, who, message):
+        self.log.insertItem(0, time.strftime("%H:%M:%S") + " · " + str(who) + ": " + str(message))
+        while self.log.count() > 100:
+            self.log.takeItem(self.log.count() - 1)
+
+
 class SettingsPage(QWidget):
     def __init__(self, controller: DesktopController) -> None:
         super().__init__()
@@ -1714,6 +1923,7 @@ class MainWindow(QMainWindow):
             "Produto",
             "Voz e áudio",
             "Configurações",
+            "Teste",
         ):
             self.nav.addItem(QListWidgetItem(name))
         side_layout.addWidget(self.nav, 1)
@@ -1730,10 +1940,12 @@ class MainWindow(QMainWindow):
         self.product_page = ProductPage(self.controller)
         self.voice_audio_page = VoiceAudioPage(self.controller)
         self.settings_page = SettingsPage(self.controller)
+        self.test_page = TestPage(self.controller)
         self.pages.addWidget(self.dashboard)
         self.pages.addWidget(self.product_page)
         self.pages.addWidget(self.voice_audio_page)
         self.pages.addWidget(self.settings_page)
+        self.pages.addWidget(self.test_page)
 
         self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.nav.currentRowChanged.connect(self._page_changed)
@@ -1784,6 +1996,8 @@ class MainWindow(QMainWindow):
             self.voice_audio_page.load()
         elif index == 3:
             self.settings_page.load()
+        elif index == 4:
+            self.test_page.reload_product()
 
     def refresh(self) -> None:
         try:
