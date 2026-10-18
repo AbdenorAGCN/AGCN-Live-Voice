@@ -1,11 +1,20 @@
 name: Build Windows Complete Offline Installer
 
 on:
+  # Also run automatically when the complete-build workflow/download helper changes.
+  # This lets a verified update produce a fresh All-In-One artifact from main.
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-windows-complete.yml"
+      - "scripts/download_drive_file.py"
   workflow_dispatch:
     inputs:
       presenter_adapter_url:
-        description: "Cole a URL direta temporária e ainda válida do arquivo adapter_model.safetensors. Não cole esta descrição: é necessário o link real de download; links temporários expiram."
+        description: "Link público do adapter_model.safetensors (Google Drive compartilhado ou URL direta). A versão v0.1 validada é o padrão."
         required: true
+        default: "https://drive.google.com/file/d/1A3r0_51u3O1-rWZ-yOsMBlS4FNPiCEbH/view?usp=drivesdk"
         type: string
 
 concurrency:
@@ -31,15 +40,17 @@ jobs:
 
       - name: Bundle trained AGCN Presenter v0.1
         shell: pwsh
+        env:
+          # On push, workflow_dispatch inputs are absent; use the public v0.1 Drive share.
+          PRESENTER_ADAPTER_URL: ${{ inputs.presenter_adapter_url || 'https://drive.google.com/file/d/1A3r0_51u3O1-rWZ-yOsMBlS4FNPiCEbH/view?usp=drivesdk' }}
         run: |
-          python -m pip install safetensors numpy
-          $adapterUrl = '${{ inputs.presenter_adapter_url }}'
-          if ([string]::IsNullOrWhiteSpace($adapterUrl) -or $adapterUrl -notmatch '^https?://') {
-            throw "Informe em Run workflow a URL HTTP/HTTPS direta e válida do adapter_model.safetensors. A descrição do campo não é uma URL."
+          python -m pip install safetensors numpy requests
+          if ([string]::IsNullOrWhiteSpace("$env:PRESENTER_ADAPTER_URL") -or "$env:PRESENTER_ADAPTER_URL" -notmatch '^https?://') {
+            throw "Informe uma URL HTTP/HTTPS válida do adapter_model.safetensors."
           }
-          curl.exe -L --fail --retry 3 "$adapterUrl" -o "adapter_model.safetensors"
+          python scripts\download_drive_file.py "$env:PRESENTER_ADAPTER_URL" "adapter_model.safetensors"
           if ($LASTEXITCODE -ne 0 -or !(Test-Path "adapter_model.safetensors")) {
-            throw "Não foi possível baixar o adapter. Gere um novo link autenticado; links temporários antigos podem ter expirado."
+            throw "Não foi possível baixar/validar o adapter. Confira se o arquivo do Google Drive está acessível a qualquer pessoa com o link."
           }
           $sourceHash = (Get-FileHash -Algorithm SHA256 "adapter_model.safetensors").Hash.ToLower()
           if ($sourceHash -ne "5652197ef5f1bc212822d071ed28cd5a9802fea62aa3f5f802e88896486a6524") { throw "Presenter adapter SHA256 mismatch: $sourceHash" }
