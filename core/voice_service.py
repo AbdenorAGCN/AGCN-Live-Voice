@@ -74,7 +74,18 @@ class VoiceService:
             voice=voice,
             metadata=dict(metadata or {}),
         )
-        self.queue.put_nowait(job)
+        try:
+            self.queue.put_nowait(job)
+        except queue.Full:
+            # Quando a fila está cheia, elimina falas proativas ainda não
+            # iniciadas antes de rejeitar uma resposta a comentário.
+            self.clear_pending(proactive_only=True)
+            try:
+                self.queue.put_nowait(job)
+            except queue.Full as exc:
+                raise RuntimeError(
+                    "Fila de voz cheia; a fala atual será concluída antes de novas falas."
+                ) from exc
         return job
 
     def clear_pending(self, *, proactive_only: bool = False) -> int:
@@ -98,17 +109,12 @@ class VoiceService:
         return removed
 
     def interrupt_proactive(self) -> bool:
-        """Interrompe áudio proativo atual para responder um comentário."""
-        interrupted = False
-        current = self.current_job
-        if current and current.metadata.get("type") == "proactive":
-            try:
-                self.sink.stop()
-                interrupted = True
-            except Exception:
-                pass
-        self.clear_pending(proactive_only=True)
-        return interrupted
+        """Descarta somente falas proativas pendentes, sem cortar o áudio atual.
+
+        A reprodução é serial: uma resposta prioritária aguarda a frase atual
+        terminar, evitando sílabas cortadas e falas que começam pela metade.
+        """
+        return bool(self.clear_pending(proactive_only=True))
 
     def stop(self) -> None:
         self.stop_event.set()
