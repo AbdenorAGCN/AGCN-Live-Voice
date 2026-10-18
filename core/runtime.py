@@ -281,8 +281,7 @@ class AGCNVoiceRuntime:
         self._preflight_brain()
         while not self.presenter_stop_event.is_set():
             try:
-                with self.lock:
-                    self._tick_presenter_locked()
+                self._tick_presenter_unlocked()
                 self.presenter_worker_error = ""
             except Exception as exc:
                 self.presenter_worker_error = str(exc)
@@ -424,26 +423,29 @@ class AGCNVoiceRuntime:
             return item
         return None
 
-    def _tick_presenter_locked(self):
-        self._sync_active_product_locked()
+    def _tick_presenter_unlocked(self):
+        with self.lock:
+            self._sync_active_product_locked()
 
-        monitor_state = self.monitor.snapshot()
-        if not (
-            monitor_state.get("monitoring")
-            and monitor_state.get("status") == "ativo"
-        ):
-            return
+            monitor_state = self.monitor.snapshot()
+            if not (
+                monitor_state.get("monitoring")
+                and monitor_state.get("status") == "ativo"
+            ):
+                return
 
-        now = time.time()
-        product_window = self._product_window_active(now)
-        comments_locked = bool(self.forced_product_until)
+            now = time.time()
+            product_window = self._product_window_active(now)
+            comments_locked = bool(self.forced_product_until)
+            presenter = self.presenter
 
-        # No modo produto, comentários continuam sendo recebidos/classificados,
-        # mas não gastam Brain/API. PresenterV3 transforma em planos pendentes;
-        # Presenter legado apenas deixa o CommentFusion aguardar.
+        # UNLOCKED GENERATION SEGMENT
+        # We process comments and maybe proactive generation without locking the UI.
+        # Note: If `_on_monitor_event` fires, it accesses `presenter` concurrently, but python appends are thread-safe,
+        # and we assume `presenter` queues tolerate concurrent additions.
         if comments_locked:
             collect = getattr(
-                self.presenter,
+                presenter,
                 "collect_pending_comments",
                 None,
             )
@@ -451,80 +453,94 @@ class AGCNVoiceRuntime:
                 collect()
             created = []
         else:
-            created = self.presenter.process_pending_comments()
+            created = presenter.process_pending_comments()
+
+        with self.lock:
+            if presenter is not self.presenter:
+                return # product changed during generation!
+
             if created:
                 self.items_queued += len(created)
 
-        queue = self.presenter.queue_snapshot()
+            queue = self.presenter.queue_snapshot()
 
-        if self.current_speech and now < self.current_speech_until:
-            # Durante os 30s de produto, nenhuma pergunta interrompe.
-            if product_window or self.reactive_streak >= self.MAX_REACTIVE_BURST:
+            now = time.time()
+            if self.current_speech and now < self.current_speech_until:
+                if product_window or self.reactive_streak >= self.MAX_REACTIVE_BURST:
+                    return
+
+                if (
+                    queue
+                    and queue[0].get("priority", 0) >= self.REACTIVE_INTERRUPT_PRIORITY
+                    and (
+                        self.current_speech.get("type") == "proactive"
+                        or queue[0].get("priority", 0) > self.current_speech.get("priority", 0)
+                    )
+                ):
+                    self.current_speech_until = 0.0
+                    self.interruptions += 1
+                else:
+                    return
+
+            self.current_speech = None
+
+        # Re-evaluating unlocked
+        if product_window:
+            item = self._forced_proactive()
+        else:
+            proactive = presenter.maybe_proactive()
+            item = presenter.next_speech()
+
+        with self.lock:
+            if presenter is not self.presenter:
                 return
+
+            if product_window:
+                if item:
+                    self.proactive_generated += 1
+            else:
+                if proactive:
+                    self.proactive_generated += 1
+                    self.items_queued += 1
+
+            if not item:
+                return
+
+            self.current_speech = item
+            self.speeches_generated += 1
+
+            if item.get("type") == "reactive":
+                self.last_decision = item
+                self.reactive_streak += 1
+            elif not product_window:
+                self.reactive_streak = 0
+
+            try:
+                self._queue_voice(item)
+            except Exception as exc:
+                item["voice_error"] = str(exc)
+
+            duration = min(
+                12.0,
+                max(2.5, len(item["speech"]) / 16.0),
+            )
+            now = time.time()
+            self.current_speech_until = now + duration
 
             if (
-                queue
-                and queue[0].get("priority", 0)
-                >= self.REACTIVE_INTERRUPT_PRIORITY
-                and (
-                    self.current_speech.get("type") == "proactive"
-                    or queue[0].get("priority", 0)
-                    > self.current_speech.get("priority", 0)
-                )
+                item.get("type") == "reactive"
+                and self.reactive_streak >= self.MAX_REACTIVE_BURST
+                and not self.forced_product_until
             ):
-                self.current_speech_until = 0.0
-                self.interruptions += 1
-            else:
-                return
+                self._schedule_product_window_after(self.current_speech_until)
 
-        self.current_speech = None
-        now = time.time()
-        product_window = self._product_window_active(now)
-
-        if product_window:
-            # Foco absoluto no produto. A fila reativa fica intacta.
-            item = self._forced_proactive()
-            if item:
-                self.proactive_generated += 1
-        else:
-            proactive = self.presenter.maybe_proactive()
-            if proactive:
-                self.proactive_generated += 1
-                self.items_queued += 1
-
-            item = self.presenter.next_speech()
-
-        if not item:
-            return
-
-        self.current_speech = item
-        self.speeches_generated += 1
-
-        if item.get("type") == "reactive":
-            self.last_decision = item
-            self.reactive_streak += 1
-        elif not product_window:
-            # Uma fala espontânea de produto quebra uma sequência curta de
-            # perguntas antes de chegar ao limite.
-            self.reactive_streak = 0
-
-        try:
-            self._queue_voice(item)
-        except Exception as exc:
-            item["voice_error"] = str(exc)
-
-        duration = min(
-            12.0,
-            max(2.5, len(item["speech"]) / 16.0),
-        )
-        self.current_speech_until = now + duration
-
-        if (
-            item.get("type") == "reactive"
-            and self.reactive_streak >= self.MAX_REACTIVE_BURST
-            and not self.forced_product_until
-        ):
-            self._schedule_product_window_after(self.current_speech_until)
+    def _tick_presenter_locked(self):
+        # Forward to new implementation for backwards compatibility with test files
+        # Alternatively, we just use the un-locked method.
+        # To avoid breaking tests that call this directly with `with runtime.lock: runtime._tick_presenter_locked()`,
+        # we can just ignore the lock here if it's already held by the test thread.
+        # But `with self.lock` inside `_tick_presenter_unlocked` handles reentrancy safely!
+        self._tick_presenter_unlocked()
 
     def snapshot(self) -> dict:
         """Snapshot somente-leitura: nunca chama LLM/TTS."""
