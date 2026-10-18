@@ -20,6 +20,7 @@ from core.memory_manager import MemoryManager
 from core.sales_guard import SalesGuard
 from core.silence_watchdog import SilenceWatchdog
 from core.speech_planner import SpeechPlanner
+from core.presenter_v2 import PresenterV2
 
 
 class PresenterV3:
@@ -352,6 +353,36 @@ class PresenterV3:
             },
         }
 
+    def _fallback_item(self, plan: dict, reason: str = "") -> dict | None:
+        """Gera uma fala determinística quando o Brain falha ou devolve saída inválida.
+
+        O fallback nunca inventa fatos: PresenterV2 aplica o mesmo SalesGuard
+        e descarta perguntas factuais sem resposta cadastrada.
+        """
+        fallback = PresenterV2(self.product)
+        item = fallback._render_plan(plan)
+        if not item:
+            return None
+        item.update({
+            "type": plan.get("type"),
+            "intent": plan.get("intent"),
+            "category": plan.get("intent"),
+            "topic": plan.get("topic") or item.get("topic"),
+            "tactic": plan.get("tactic"),
+            "priority": plan.get("priority", 0),
+            "user": plan.get("user") or item.get("user"),
+            "comment": plan.get("comment"),
+            "cta": plan.get("cta") or item.get("cta"),
+            "plan": plan.get("steps", []),
+            "resume_topic": plan.get("resume_topic"),
+            "used_facts": [str(plan.get("fact"))] if plan.get("fact") not in (None, "", [], {}) else [],
+            "needs_fact": False,
+            "brain": "fallback determinístico",
+            "fallback_reason": str(reason or "Brain sem saída utilizável"),
+            "created_at": time.time(),
+        })
+        return item
+
     def _generate_item(self, plan: dict) -> dict | None:
         mode = (
             "proactive"
@@ -373,12 +404,25 @@ class PresenterV3:
             self.last_brain_error = ""
         except Exception as exc:
             self.last_brain_error = str(exc)
+            return self._fallback_item(plan, self.last_brain_error)
+
+        # Um erro de classificação do modelo não pode silenciar o fluxo
+        # proativo. O fallback usa somente os fatos aprovados pelo SalesGuard.
+        if result.needs_fact:
+            if plan.get("type") == "proactive":
+                return self._fallback_item(plan, "Brain marcou fala proativa como dependente de fato")
             return None
 
-        # Segunda barreira: se qualquer Brain detectar que faltou fato,
-        # a fala é descartada. Qwen local e API obedecem à mesma regra.
-        if result.needs_fact:
-            return None
+        speech = str(result.speech or "").strip()
+        if not speech:
+            self.last_brain_error = "Brain devolveu fala vazia"
+            return self._fallback_item(plan, self.last_brain_error)
+
+        # O TTS recebe frases completas, não texto com espaços ou quebras
+        # residuais no fim. Se a saída parece truncada, usa a fala determinística.
+        if speech[-1] not in ".!?…»”\"'":
+            self.last_brain_error = "Brain devolveu fala sem encerramento"
+            return self._fallback_item(plan, self.last_brain_error)
 
         return {
             "type": plan.get("type"),
@@ -390,7 +434,7 @@ class PresenterV3:
             "priority": plan.get("priority", 0),
             "user": plan.get("user"),
             "comment": plan.get("comment"),
-            "speech": result.speech,
+            "speech": speech,
             "cta": plan.get("cta"),
             "plan": plan.get("steps", []),
             "resume_topic": (
