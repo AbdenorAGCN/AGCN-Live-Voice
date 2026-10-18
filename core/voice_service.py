@@ -114,7 +114,12 @@ class VoiceService:
         A reprodução é serial: uma resposta prioritária aguarda a frase atual
         terminar, evitando sílabas cortadas e falas que começam pela metade.
         """
-        return bool(self.clear_pending(proactive_only=True))
+        current = self.current_job
+        current_is_proactive = bool(
+            current and current.metadata.get("type") == "proactive"
+        )
+        removed = self.clear_pending(proactive_only=True)
+        return current_is_proactive or bool(removed)
 
     def stop(self) -> None:
         self.stop_event.set()
