@@ -994,6 +994,9 @@ class ProductPage(QWidget):
             self._set_text(self.fields[field], live.get(field))
         self.live_offer.setChecked(bool(live.get("live_offer")))
         self.image_path = str(product.get("image_url") or "")
+        if self.image_path.casefold().startswith(("http://", "https://")):
+            # URLs antigas não são mais usadas: a imagem precisa estar no PC.
+            self.image_path = ""
         self._set_text(self.fields["image_url"], self.image_path)
         self._show_product_image(self.image_path)
 
@@ -1308,9 +1311,9 @@ class VoiceAudioPage(QWidget):
             self.voice_style_combo.addItem(label, style_id)
 
         self.voice_hint = QLabel(
-            "No modo Automático, o AGCN escolhe a interpretação conforme "
-            "comentário, preço, compra, objeção, escassez e etapa da venda. "
-            "O modo manual força o estilo selecionado em todas as falas."
+            "Escolha entre Neutra, Animada e Vendedor. Cada opção aplica "
+            "instruções expressivas próprias ao motor de voz; a intensidade "
+            "controla o quanto essa direção deve ficar perceptível."
         )
         self.voice_hint.setWordWrap(True)
         self.voice_hint.setStyleSheet("color:#6B7280;font-size:12px;")
