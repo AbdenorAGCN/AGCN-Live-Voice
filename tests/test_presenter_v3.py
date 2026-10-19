@@ -64,6 +64,17 @@ def test_comment_goes_through_decision_plan_context_and_brain():
     assert context.live_conditions["current_price"] == 199.90
 
 
+def test_low_value_engagement_is_ignored_without_brain_call():
+    brain = FakeBrain()
+    presenter = PresenterV3(product(), brain)
+
+    result = presenter.test_comment("Gabriel", "top")
+
+    assert result["ignored"] is True
+    assert result["speech"] is None
+    assert brain.contexts == []
+
+
 def test_proactive_uses_registered_product_as_source_of_truth():
     brain = FakeBrain()
     presenter = PresenterV3(product(), brain)
