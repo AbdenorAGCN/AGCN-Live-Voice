@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
 import re
 import queue
 import random
+import shutil
 import threading
 import time
+import zipfile
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
@@ -12,6 +16,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QFrame,
+    QFileDialog,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -21,6 +26,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QPixmap,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -32,6 +38,7 @@ from PySide6.QtWidgets import (
 
 from core.voice_profiles import list_voice_profiles
 from desktop.app_controller import DesktopController
+from desktop.config_store import app_data_dir
 from desktop.ui_theme import (
     APP_STYLESHEET,
     apply_danger,
@@ -41,18 +48,9 @@ from desktop.ui_theme import (
 
 
 VOICE_STYLE_OPTIONS = [
-    ("Automático — recomendado", "auto"),
-    ("Vendas — energética", "sales_energy"),
-    ("Animada / empolgada", "excited"),
-    ("Comemorativa", "celebratory"),
-    ("Urgência controlada", "urgent_grounded"),
-    ("Preço — confiante", "price_confident"),
-    ("Tranquila / segura", "reassuring"),
-    ("Empática — dor e solução", "empathetic_solution"),
-    ("Desejo / imaginação de uso", "vivid_desire"),
-    ("Resposta direta", "clear_answer"),
-    ("Acolhedora", "welcoming"),
-    ("Suspense / revelação", "suspense_reveal"),
+    ("Neutra", "neutral"),
+    ("Animada", "excited"),
+    ("Vendedor", "sales_energy"),
 ]
 
 
@@ -235,6 +233,12 @@ class DashboardPage(QWidget):
         metric, self.voice = metric_block("Voz")
         metrics.addWidget(metric, 1, 2)
         status_layout.addLayout(metrics)
+        self.product_image = QLabel()
+        self.product_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.product_image.setMaximumHeight(110)
+        self.product_image.setVisible(False)
+        status_layout.addWidget(self.product_image)
+        self._active_image_path = ""
 
         status_footer = QHBoxLayout()
         status_footer.setSpacing(8)
@@ -374,6 +378,9 @@ class DashboardPage(QWidget):
         self.stop_btn.clicked.connect(self._stop)
 
         self._show_empty_lists()
+        plan_card.setVisible(False)
+        comments_card.setVisible(False)
+        queue_card.setVisible(False)
 
     def _show_empty_lists(self) -> None:
         if self.comments.count() == 0:
@@ -440,6 +447,19 @@ class DashboardPage(QWidget):
 
         active = data.get("active_product") or {}
         self.product.setText(active.get("name") or "Nenhum")
+        image_path = str(active.get("image_url") or "")
+        if image_path != getattr(self, "_active_image_path", None):
+            self._active_image_path = image_path
+            pixmap = QPixmap(image_path) if image_path and Path(image_path).is_file() else QPixmap()
+            if pixmap.isNull():
+                self.product_image.clear()
+                self.product_image.setVisible(False)
+            else:
+                self.product_image.setPixmap(pixmap.scaled(
+                    180, 100, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                ))
+                self.product_image.setVisible(True)
         self.brain.setText(str(data.get("brain_provider") or "—"))
 
         voice = data.get("voice") or {}
@@ -565,33 +585,30 @@ class DashboardPage(QWidget):
                 else "Manter fluxo da apresentação"
             )
 
-        self.comments.clear()
         comments = list(data.get("comments") or [])
-        if comments:
-            for item in reversed(comments):
-                user = item.get("user") or "—"
-                text = item.get("text") or ""
-                self.comments.addItem(f"{user}  ·  {text}")
-        else:
-            self.comments.addItem(
-                "Aguardando comentários da LIVE..."
-            )
+        comments_signature = tuple((str(item.get("user") or ""), str(item.get("text") or "")) for item in comments)
+        if comments_signature != getattr(self, "_comments_signature", None):
+            self._comments_signature = comments_signature
+            self.comments.clear()
+            if comments:
+                for item in reversed(comments):
+                    self.comments.addItem(f"{item.get('user') or '—'}  ·  {item.get('text') or ''}")
+            else:
+                self.comments.addItem("Aguardando comentários da LIVE...")
 
-        self.queue.clear()
-        queue = list(data.get("queue") or [])
-        if queue:
-            for item in queue:
-                priority = item.get("priority", 0)
-                text = item.get("comment") or item.get("speech") or ""
-                label = item.get("topic") or item.get("intent") or "decisão"
-                label = str(label).replace("_", " ").title()
-                self.queue.addItem(
-                    f"{label}  ·  prioridade {priority}\n{text}"
-                )
-        else:
-            self.queue.addItem(
-                "Aguardando decisões do Presenter..."
-            )
+        queue_items = list(data.get("queue") or [])
+        queue_signature = tuple((str(item.get("priority", 0)), str(item.get("comment") or item.get("speech") or ""), str(item.get("topic") or item.get("intent") or "decisão")) for item in queue_items)
+        if queue_signature != getattr(self, "_queue_signature", None):
+            self._queue_signature = queue_signature
+            self.queue.clear()
+            if queue_items:
+                for item in queue_items:
+                    priority = item.get("priority", 0)
+                    text = item.get("comment") or item.get("speech") or ""
+                    label = str(item.get("topic") or item.get("intent") or "decisão").replace("_", " ").title()
+                    self.queue.addItem(f"{label}  ·  prioridade {priority}\n{text}")
+            else:
+                self.queue.addItem("Aguardando decisões do Presenter...")
 
         presenter = data.get("presenter") or {}
         presenter_brain = presenter.get("brain") or {}
@@ -743,7 +760,6 @@ class ProductPage(QWidget):
         ("warranty", "Garantia"),
         ("limitations", "Limitações"),
         ("additional_info", "Informações adicionais"),
-        ("image_url", "URL da imagem"),
     ]
     LIVE = [
         ("regular_price", "Preço regular"),
@@ -762,6 +778,14 @@ class ProductPage(QWidget):
         self.controller = controller
         self.current_id: str | None = None
         self.fields: dict[str, QWidget] = {}
+        self.fields["image_url"] = QLineEdit()
+        self.fields["image_url"].setVisible(False)
+        self.image_path = ""
+        self.image_preview = QLabel("Nenhuma imagem selecionada")
+        self.image_preview.setMinimumHeight(96)
+        self.image_preview.setMaximumHeight(140)
+        self.image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_preview.setObjectName("InfoBanner")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 22, 24, 24)
@@ -789,6 +813,12 @@ class ProductPage(QWidget):
         top.addWidget(self.new_btn)
         top.addWidget(self.activate_btn)
         top.addWidget(self.delete_btn)
+        self.export_btn = QPushButton("Exportar")
+        self.import_btn = QPushButton("Importar")
+        apply_ghost(self.export_btn)
+        apply_ghost(self.import_btn)
+        top.addWidget(self.export_btn)
+        top.addWidget(self.import_btn)
         selector_layout.addLayout(top)
         root.addWidget(selector_card)
 
@@ -840,6 +870,23 @@ class ProductPage(QWidget):
             permanent_form.addRow(label, widget)
         stack.addWidget(permanent_box)
 
+        image_box = group("Imagem do produto")
+        image_layout = QHBoxLayout(image_box)
+        self.image_preview.setMinimumWidth(160)
+        image_layout.addWidget(self.image_preview, 1)
+        image_actions = QVBoxLayout()
+        self.upload_image_btn = QPushButton("Escolher imagem do computador")
+        apply_ghost(self.upload_image_btn)
+        self.upload_image_btn.clicked.connect(self._choose_image)
+        image_actions.addWidget(self.upload_image_btn)
+        self.remove_image_btn = QPushButton("Remover imagem")
+        apply_ghost(self.remove_image_btn)
+        self.remove_image_btn.clicked.connect(self._remove_image)
+        image_actions.addWidget(self.remove_image_btn)
+        image_actions.addStretch(1)
+        image_layout.addLayout(image_actions)
+        stack.addWidget(image_box)
+
         live_box = group("Condições desta LIVE")
         live_form = QFormLayout(live_box)
         live_form.setFieldGrowthPolicy(
@@ -869,6 +916,8 @@ class ProductPage(QWidget):
         self.activate_btn.clicked.connect(self._activate)
         self.delete_btn.clicked.connect(self._delete)
         self.save_btn.clicked.connect(self._save)
+        self.export_btn.clicked.connect(self._export_product)
+        self.import_btn.clicked.connect(self._import_product)
 
         self.reload_products()
 
@@ -913,10 +962,12 @@ class ProductPage(QWidget):
 
     def clear_form(self) -> None:
         self.current_id = None
+        self.image_path = ""
         self.product_combo.setCurrentIndex(0)
         for widget in self.fields.values():
             self._set_text(widget, "")
         self.live_offer.setChecked(False)
+        self._show_product_image("")
 
     def _selected(self, index: int) -> None:
         product_id = self.product_combo.itemData(index)
@@ -942,6 +993,119 @@ class ProductPage(QWidget):
         for field, _ in self.LIVE:
             self._set_text(self.fields[field], live.get(field))
         self.live_offer.setChecked(bool(live.get("live_offer")))
+        self.image_path = str(product.get("image_url") or "")
+        self._set_text(self.fields["image_url"], self.image_path)
+        self._show_product_image(self.image_path)
+
+    def _show_product_image(self, path: str) -> None:
+        candidate = Path(path) if path else None
+        if candidate and candidate.is_file():
+            pixmap = QPixmap(str(candidate))
+            if not pixmap.isNull():
+                self.image_preview.setPixmap(pixmap.scaled(
+                    240, 128, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                ))
+                self.image_preview.setToolTip(str(candidate))
+                return
+        self.image_preview.setPixmap(QPixmap())
+        self.image_preview.setText("Nenhuma imagem selecionada")
+        self.image_preview.setToolTip("")
+
+    def _choose_image(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Selecionar imagem do produto", "",
+            "Imagens (*.png *.jpg *.jpeg *.webp *.bmp)",
+        )
+        if not filename:
+            return
+        source = Path(filename)
+        target_dir = app_data_dir() / "product_images"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / (str(int(time.time() * 1000)) + source.suffix.lower())
+        try:
+            shutil.copy2(source, target)
+            self.image_path = str(target)
+            self._set_text(self.fields["image_url"], self.image_path)
+            self._show_product_image(self.image_path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Imagem do produto", str(exc))
+
+    def _remove_image(self) -> None:
+        self.image_path = ""
+        self._set_text(self.fields["image_url"], "")
+        self._show_product_image("")
+
+    def _export_product(self) -> None:
+        if not self.current_id:
+            QMessageBox.information(self, "Exportar produto", "Salve ou selecione um produto antes de exportar.")
+            return
+        product = next((p for p in self.controller.products() if p.get("id") == self.current_id), None)
+        if not product:
+            QMessageBox.warning(self, "Exportar produto", "O produto selecionado não foi encontrado.")
+            return
+        default_name = str(product.get("name") or "produto").strip().replace("/", "-") + ".agcnproduct"
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Exportar pacote do produto", default_name,
+            "Pacote de produto AGCN (*.agcnproduct *.zip)",
+        )
+        if not filename:
+            return
+        data = dict(product)
+        image_file = Path(str(data.get("image_url") or ""))
+        image_name = ""
+        if image_file.is_file():
+            image_name = "images/" + image_file.name
+            data["image_url"] = image_name
+        else:
+            data["image_url"] = ""
+        data["agcn_package_version"] = 1
+        try:
+            with zipfile.ZipFile(filename, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("product.json", json.dumps(data, ensure_ascii=False, indent=2))
+                if image_name:
+                    archive.write(image_file, image_name)
+            QMessageBox.information(self, "Exportar produto", "Produto exportado com textos, configurações e imagem quando disponível.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Exportar produto", str(exc))
+
+    def _import_product(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Importar pacote do produto", "",
+            "Pacote de produto AGCN (*.agcnproduct *.zip)",
+        )
+        if not filename:
+            return
+        try:
+            with zipfile.ZipFile(filename, "r") as archive:
+                names = set(archive.namelist())
+                if "product.json" not in names:
+                    raise ValueError("O pacote não contém product.json.")
+                data = json.loads(archive.read("product.json").decode("utf-8"))
+                if not isinstance(data, dict):
+                    raise ValueError("O arquivo do produto é inválido.")
+                image_ref = str(data.get("image_url") or "")
+                if image_ref.startswith("images/") and image_ref in names:
+                    target_dir = app_data_dir() / "product_images"
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    target = target_dir / (str(int(time.time() * 1000)) + Path(image_ref).suffix.lower())
+                    target.write_bytes(archive.read(image_ref))
+                    data["image_url"] = str(target)
+                else:
+                    data["image_url"] = ""
+            self.current_id = None
+            live = data.get("live_conditions") or {}
+            for field, _ in self.PERMANENT:
+                self._set_text(self.fields[field], data.get(field, ""))
+            self._set_text(self.fields["image_url"], data.get("image_url", ""))
+            for field, _ in self.LIVE:
+                self._set_text(self.fields[field], live.get(field, data.get(field, "")))
+            self.live_offer.setChecked(bool(live.get("live_offer", data.get("live_offer", False))))
+            self.image_path = str(data.get("image_url") or "")
+            self._show_product_image(self.image_path)
+            QMessageBox.information(self, "Importar produto", "Pacote carregado no formulário. Confira os dados e clique em 'Salvar e usar este produto'.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Importar produto", str(exc))
 
     def _payload(self) -> dict:
         payload = {
@@ -1532,9 +1696,19 @@ class TestPage(QWidget):
         self.start_btn.clicked.connect(self.start_test)
         self.stop_btn.clicked.connect(self.stop_test)
         self.poll = QTimer(self)
-        self.poll.setInterval(250)
+        self.poll.setInterval(350)
         self.poll.timeout.connect(self.drain_events)
         self.poll.start()
+        self.comment_frequency = QComboBox()
+        self.comment_frequency.addItem("Poucos comentários", 10.0)
+        self.comment_frequency.addItem("Frequência média", 6.0)
+        self.comment_frequency.addItem("Muitos comentários", 3.0)
+        self.comment_interval_seconds = 6.0
+        self.comment_frequency.currentIndexChanged.connect(
+            lambda _index: setattr(self, "comment_interval_seconds",
+                float(self.comment_frequency.currentData() or 6.0))
+        )
+        actions.insertWidget(0, self.comment_frequency)
         self.reload_product()
 
     @staticmethod
@@ -1602,7 +1776,12 @@ class TestPage(QWidget):
             # Começa com uma apresentação espontânea e intercala pitches
             # com comentários para verificar os dois caminhos de conversa.
             proactive_turn = cycle % 3 == 0
-            user = "cliente_" + str(random.randint(10, 999))
+            user = random.choice([
+                "Luiza", "Marília", "Augusto", "Gabriel", "Camila",
+                "Rafael", "Beatriz", "João", "Larissa", "Mateus",
+                "Ana Clara", "Pedro", "Isabela", "Vinícius", "Sofia",
+                "Bruna", "Felipe", "Marcos", "Júlia", "Eduardo",
+            ])
             comment = random.choice(self.COMMENTS)
             started = time.monotonic()
 
@@ -1661,7 +1840,7 @@ class TestPage(QWidget):
             cycle += 1
             self.viewers = max(0, min(250, self.viewers + random.randint(-5, 8)))
             self.events.put(("viewers", self.viewers))
-            if self.stop_event.wait(4.0):
+            if self.stop_event.wait(self.comment_interval_seconds):
                 break
 
         self.events.put(("finished", None))
@@ -1767,6 +1946,12 @@ class SettingsPage(QWidget):
         self.api_key.setPlaceholderText(
             "Deixe vazio para manter a chave OpenAI já salva"
         )
+        self.gemini_api_key = QLineEdit()
+        self.gemini_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.gemini_api_key.setPlaceholderText(
+            "Deixe vazio para manter a chave Gemini já salva"
+        )
+        self.gemini_key_status = QLabel("")
         self.fallback = QCheckBox(
             "Usar AGCN Local se a API falhar"
         )
@@ -1774,7 +1959,9 @@ class SettingsPage(QWidget):
         brain_form.addRow("Brain local", self.local_brain_status)
         brain_form.addRow("API URL", self.api_url)
         brain_form.addRow("Modelo API", self.api_model)
-        brain_form.addRow("Chave OpenAI", self.api_key)
+        brain_form.addRow("Chave API OpenAI", self.api_key)
+        brain_form.addRow("Chave API Gemini", self.gemini_api_key)
+        brain_form.addRow("Status Gemini", self.gemini_key_status)
         brain_form.addRow("", self.fallback)
 
         brain_actions = QHBoxLayout()
@@ -1830,6 +2017,10 @@ class SettingsPage(QWidget):
             if self.controller.api_key_saved()
             else "Chave OpenAI opcional; AGCN Local funciona offline"
         )
+        self.gemini_key_status.setText(
+            "Chave Gemini salva" if self.controller.gemini_key_saved()
+            else "Chave Gemini opcional"
+        )
 
     def _patch(self) -> dict:
         return {
@@ -1854,11 +2045,13 @@ class SettingsPage(QWidget):
     def _save(self) -> None:
         try:
             key = self.api_key.text().strip()
+            gemini_key = self.gemini_api_key.text().strip()
             self.controller.save_settings(
-                self._patch(),
-                openai_key=key if key else None,
+                self._patch(), openai_key=key if key else None,
+                gemini_key=gemini_key if gemini_key else None,
             )
             self.api_key.clear()
+            self.gemini_api_key.clear()
             self.load()
             QMessageBox.information(
                 self,
@@ -1870,12 +2063,15 @@ class SettingsPage(QWidget):
 
     def _apply_settings_before_test(self) -> None:
         key = self.api_key.text().strip()
+        gemini_key = self.gemini_api_key.text().strip()
         self.controller.save_settings(
-            self._patch(),
-            openai_key=key if key else None,
+            self._patch(), openai_key=key if key else None,
+            gemini_key=gemini_key if gemini_key else None,
         )
         if key:
             self.api_key.clear()
+        if gemini_key:
+            self.gemini_api_key.clear()
 
     def _test_brain(self) -> None:
         try:
@@ -1948,7 +2144,7 @@ class MainWindow(QMainWindow):
         brand.setWordWrap(True)
         side_layout.addWidget(brand)
 
-        brand_subtitle = QLabel("Apresentador inteligente para LIVE")
+        brand_subtitle = QLabel("Apresentador inteligente para LIVE · v1.1.0")
         brand_subtitle.setObjectName("BrandSubtitle")
         brand_subtitle.setWordWrap(True)
         side_layout.addWidget(brand_subtitle)
@@ -2022,7 +2218,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(APP_STYLESHEET)
 
         self.timer = QTimer(self)
-        self.timer.setInterval(700)
+        self.timer.setInterval(1000)
         self.timer.timeout.connect(self.refresh)
         self.timer.start()
         self.refresh()
@@ -2040,7 +2236,8 @@ class MainWindow(QMainWindow):
     def refresh(self) -> None:
         try:
             data = self.controller.snapshot()
-            self.dashboard.refresh(data)
+            if self.pages.currentIndex() == 0:
+                self.dashboard.refresh(data)
             self._refresh_top_bar(data)
         except Exception as exc:
             self.dashboard.diagnostic.setText(str(exc))
