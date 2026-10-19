@@ -1,5 +1,5 @@
 #define MyAppName "AGCN Live Voice"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "AGCN"
 #define MyAppExeName "AGCN Live Voice.exe"
 
