@@ -221,7 +221,7 @@ jobs:
       - name: Upload complete installer
         uses: actions/upload-artifact@v4
         with:
-          name: AGCN-Live-Voice-All-In-One-Presenter-v0.1
+          name: AGCN-Live-Voice-v1.1.0-All-In-One-Presenter-v0.1
           path: installer_output/*
           if-no-files-found: error
           retention-days: 7
