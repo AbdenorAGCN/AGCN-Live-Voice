@@ -1,5 +1,7 @@
 # AGCN Live Voice
 
+**Versão do aplicativo: 1.1.0**
+
 Aplicativo Windows para LIVE commerce com Presenter inteligente, monitoramento de TikTok LIVE, produto ativo e voz.
 
 ## Estado atual
