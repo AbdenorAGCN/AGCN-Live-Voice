@@ -435,13 +435,14 @@ class AGCNVoiceRuntime:
         # Defer generation while TTS is synthesizing/playing or has queued audio:
         # this keeps the voice queue short and avoids stale pitches piling up.
         voice_busy = False
+        voice_queue_depth = 0
+        voice_playing = False
         if self.voice_service is not None:
             try:
                 voice_state = self.voice_service.snapshot()
-                voice_busy = bool(
-                    voice_state.get("current")
-                    or int(voice_state.get("queued") or 0) > 0
-                )
+                voice_queue_depth = int(voice_state.get("queued") or 0)
+                voice_playing = bool(voice_state.get("playing"))
+                voice_busy = bool(voice_state.get("current") or voice_queue_depth > 0)
             except Exception:
                 voice_busy = False
 
@@ -471,7 +472,9 @@ class AGCNVoiceRuntime:
                 )
                 if analyzed:
                     analyzed_count += 1
-            if comments_locked or voice_busy:
+            if comments_locked or (
+                voice_busy and (voice_queue_depth > 0 or not voice_playing)
+            ):
                 collect = getattr(presenter, "collect_pending_comments", None)
                 if callable(collect):
                     collect()
@@ -493,10 +496,14 @@ class AGCNVoiceRuntime:
             # Let the active audio finish before planning another speech. New
             # comments have already been collected into the bounded Presenter
             # queue above, so no comment event is lost while the voice is busy.
-            if voice_busy:
+            if voice_busy and (voice_queue_depth > 0 or not voice_playing):
                 return
             now = time.time()
-            if self.current_speech and now < self.current_speech_until:
+            if (
+                self.current_speech
+                and now < self.current_speech_until
+                and not (voice_playing and voice_queue_depth == 0)
+            ):
                 if product_window or self.reactive_streak >= self.MAX_REACTIVE_BURST:
                     return
                 if (
