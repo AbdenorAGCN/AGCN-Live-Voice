@@ -104,10 +104,9 @@ class PresenterV3:
         if plan.get("type") == "proactive":
             return True
         intent = str(plan.get("intent") or "")
-        # Curtidas, saudações e confirmações sociais não devem virar uma
-        # resposta falada por padrão. A IA pode usar compras confirmadas como
-        # prova social em uma fala proativa, sem responder a cada comentário.
-        if intent in {"engagement", "purchase_confirmation", "unknown", ""}:
+        # Curtidas, saudações e comentários sem intenção comercial não viram
+        # fala. Confirmações de compra continuam elegíveis para alimentar prova social.
+        if intent in {"engagement", "unknown", ""}:
             return False
         if intent not in self.FACT_REQUIRED_INTENTS:
             return True
