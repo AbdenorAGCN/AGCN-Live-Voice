@@ -11,6 +11,11 @@ from typing import Any
 
 
 STYLE_LIBRARY = {
+    "neutral": (
+        "Neutral, balanced Brazilian Portuguese delivery. Clear articulation, "
+        "natural conversational pace, restrained pitch variation, no forced "
+        "excitement and no theatrical emphasis."
+    ),
     "sales_energy": (
         "Energetic and natural live-commerce delivery. Bright, confident, "
         "engaging, quick rhythm, crisp articulation and short pauses. "
