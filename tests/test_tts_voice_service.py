@@ -1,4 +1,5 @@
 import io
+import threading
 import wave
 
 from core.integration_contracts import AudioChunk
@@ -59,6 +60,37 @@ class FakeSink:
 
     def stop(self):
         self.stop_calls += 1
+
+
+def test_next_speech_is_synthesized_while_current_audio_plays():
+    playback_started = threading.Event()
+    release_playback = threading.Event()
+    second_synthesized = threading.Event()
+
+    class BlockingSink(FakeSink):
+        def play(self, chunk):
+            playback_started.set()
+            release_playback.wait(3)
+
+    class SignalingTTS(FakeTTS):
+        def synthesize(self, text, *, voice=None):
+            chunk = super().synthesize(text, voice=voice)
+            if "segunda fala" in text:
+                second_synthesized.set()
+            return chunk
+
+    service = VoiceService(SignalingTTS(), BlockingSink())
+    service.start()
+    try:
+        service.enqueue("primeira fala", metadata={"type": "proactive"})
+        assert playback_started.wait(1.5)
+        service.enqueue("segunda fala", priority=90, metadata={"type": "reactive"})
+        assert second_synthesized.wait(1.5), (
+            "A segunda fala não foi pré-sintetizada durante a reprodução."
+        )
+    finally:
+        release_playback.set()
+        service.stop()
 
 
 def test_wav_bytes_to_audio_chunk():
