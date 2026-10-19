@@ -104,6 +104,11 @@ class PresenterV3:
         if plan.get("type") == "proactive":
             return True
         intent = str(plan.get("intent") or "")
+        # Curtidas, saudações e confirmações sociais não devem virar uma
+        # resposta falada por padrão. A IA pode usar compras confirmadas como
+        # prova social em uma fala proativa, sem responder a cada comentário.
+        if intent in {"engagement", "purchase_confirmation", "unknown", ""}:
+            return False
         if intent not in self.FACT_REQUIRED_INTENTS:
             return True
         return bool(plan.get("has_fact"))
@@ -171,8 +176,8 @@ class PresenterV3:
     def process_pending_comments(
         self,
         *,
-        max_generate: int = 3,
-        target_ready_queue: int = 6,
+        max_generate: int = 1,
+        target_ready_queue: int = 2,
     ) -> list[dict]:
         """Gera poucas respostas por vez, sob demanda.
 
