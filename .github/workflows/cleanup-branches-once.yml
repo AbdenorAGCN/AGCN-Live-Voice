@@ -1,0 +1,41 @@
+name: Limpeza autorizada de branches extras
+on:
+  push:
+    paths:
+      - '.github/workflows/cleanup-branches-once.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conferir pontas SHA e excluir somente branches autorizadas
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "AbdenorAGCN/AGCN-Live-Voice"
+          while IFS='|' read -r branch expected; do
+            if [[ -z "$branch" ]]; then continue; fi
+            if [[ "$branch" == "main" ]]; then
+              echo "Erro: main nunca pode ser excluída"; exit 1
+            fi
+            current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" --jq '.object.sha')"
+            if [[ "$current" != "$expected" ]]; then
+              echo "Branch foi alterada: $branch. Operação abortada."
+              exit 1
+            fi
+          done <<'BRANCHES'
+fix-runtime-lock-contention-7979989165532135518|646b6db5195d76cdbdc87db5bf887dc376f31232
+          BRANCHES
+          while IFS='|' read -r branch expected; do
+            if [[ -z "$branch" ]]; then continue; fi
+            echo "Excluindo branch verificada: $branch"
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
+          done <<'BRANCHES'
+fix-runtime-lock-contention-7979989165532135518|646b6db5195d76cdbdc87db5bf887dc376f31232
+          BRANCHES
+          echo "Limpeza finalizada; main preservada."
