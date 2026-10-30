@@ -10,6 +10,7 @@ import secrets
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlencode, urlparse, parse_qs
 
@@ -27,14 +28,18 @@ DB_PATH = DATA / "customers.sqlite3"
 ATTEMPTS: dict[str, list[int]] = {}
 
 
+@contextmanager
 def db():
     DATA.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=15)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=15000")
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
-
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=15000")
+        conn.execute("PRAGMA journal_mode=WAL")
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 @app.on_event("startup")
 def init_database():
@@ -406,7 +411,9 @@ async def buy(request: Request):
         url = answer.get("url") or answer.get("checkout_url") or answer.get("link")
         parsed = urlparse(str(url))
         if parsed.scheme != "https" or not (parsed.hostname == "infinitepay.io" or
-                                              (parsed.hostname or "").endswith(".infinitepay.io")):
+                                              (parsed.hostname or "").endswith(".infinitepay.io") or
+                                              parsed.hostname == "infinitepay.com.br" or
+                                              (parsed.hostname or "").endswith(".infinitepay.com.br")):
             raise ValueError("URL do checkout não reconhecida.")
     except (httpx.HTTPError, ValueError, TypeError) as err:
         # Failed links never grant access or change order state.
