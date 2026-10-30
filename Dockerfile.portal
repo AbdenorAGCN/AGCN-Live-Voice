@@ -5,4 +5,4 @@ COPY requirements-portal.txt /app/requirements-portal.txt
 RUN pip install --no-cache-dir -r /app/requirements-portal.txt
 COPY . /app
 EXPOSE 8080
-CMD ["sh", "-c", "uvicorn backend.portal_app:app --host 0.0.0.0 --port $PORT"]
+CMD ["uvicorn", "backend.portal_app:app", "--host", "0.0.0.0", "--port", "8080"]
