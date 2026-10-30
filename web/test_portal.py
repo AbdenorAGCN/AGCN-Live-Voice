@@ -39,7 +39,7 @@ def test_customer_registration_account_and_signout(client):
     assert client.post("/baixar", headers={"Origin": portal.PUBLIC}).status_code == 403
     client.post("/sair", headers={"Origin": portal.PUBLIC})
     assert "Criar conta" in client.get("/").text
-    assert "Entrar" in client.get("/conta").headers["location"] or client.get("/conta").status_code == 200
+    assert "Bem-vindo de volta" in client.get("/conta").text
 
 
 def test_bad_password_and_duplicate_registration(client):
