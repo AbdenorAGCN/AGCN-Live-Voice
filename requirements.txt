@@ -6,3 +6,5 @@ beautifulsoup4>=4.12,<5
 playwright>=1.55,<2
 Pillow>=11,<12
 ImageHash>=4.3,<5
+requests>=2.31,<3
+numpy>=2.0.2,<3
