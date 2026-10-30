@@ -1,29 +1,6 @@
 __pycache__/
 *.py[cod]
 .venv/
-venv/
 .env
-.DS_Store
-data/runtime/*.json
-!data/runtime/.gitkeep
-
-# Modelos de voz baixados/empacotados durante o build
-models/kokoro/*.onnx
-models/kokoro/*.bin
-voice_hq/
-models/qwen3_tts/*.gguf
-
-# Artefatos grandes e temporarios de build
-brain_local/
-vendor/
-dist/
-build/
-installer_output/
-installer_payload/
-*.gguf
-*.safetensors
-
-# Saidas locais de treino/modelo; manifests e JSONs continuam versionados
-training/**/checkpoints/
-training/**/checkpoint-*/
-
+*.sqlite3*
+data/

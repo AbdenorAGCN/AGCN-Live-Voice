@@ -1,3 +1,0 @@
-# Dependências Python do AGCN necessárias ao controle do Voice Pack HQ.
-# O motor Qwen3-TTS em si roda no executável local qwentts.cpp/GGML.
-imageio-ffmpeg>=0.6,<1

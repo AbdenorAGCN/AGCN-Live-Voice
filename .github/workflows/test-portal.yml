@@ -2,7 +2,7 @@ name: Portal customers smoke tests
 
 on:
   push:
-    branches: [main]
+    branches: [site]
     paths:
       - "backend/portal_app.py"
       - "web/test_portal.py"
