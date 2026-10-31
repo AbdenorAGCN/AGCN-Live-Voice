@@ -73,3 +73,30 @@ def test_navigation_plans_download_and_previews(client):
         assert response.status_code == 200
         assert "<svg" in response.text
     assert client.get("/assets/previews/nao-existe.svg").status_code == 404
+
+
+def test_game_style_mobile_nav_and_screenshot_carousel(client):
+    home = client.get("/")
+    assert home.status_code == 200
+    assert 'class="agcn-mobile-nav"' in home.text
+    assert 'href="/planos" aria-current=' not in home.text
+    assert 'href="/" aria-current="page"' in home.text
+    assert 'class="agcn-showcase"' in home.text
+    assert home.text.count('class="showcase-cover"') == 3
+    assert 'src="/assets/screenshots/dashboard.html"' in home.text
+    assert 'src="/assets/screenshots/produto.html"' in home.text
+    assert 'src="/assets/screenshots/voz-audio.html"' in home.text
+    assert 'sandbox=""' in home.text
+    assert "frame-src 'self'" in home.headers["content-security-policy"]
+    script = client.get("/assets/voice-carousel.js")
+    assert script.status_code == 200
+    assert "2000" in script.text
+    assert 'data-flow-slot' not in script.text  # JS sets dataset.flowSlot dynamically
+    for name in ("dashboard", "produto", "voz-audio"):
+        preview = client.get(f"/assets/screenshots/{name}.html")
+        assert preview.status_code == 200
+        assert 'width:1600px' in preview.text
+        assert "<script" not in preview.text.lower()
+    assert client.get("/assets/screenshots/invalid.html").status_code == 404
+    assert 'href="/planos" aria-current="page"' in client.get("/planos").text
+    assert 'href="/conta" aria-current="page"' in client.get("/conta").text
