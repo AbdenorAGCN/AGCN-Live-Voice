@@ -43,8 +43,6 @@ def db():
 
 @app.on_event("startup")
 def init_database():
-    private_key = os.getenv("AGCN_ADMIN_METRICS_SECRET", "")
-    print("AGCN_PRIVATE_METRICS", "enabled" if len(private_key) >= 40 else "disabled", hashlib.sha256(private_key.encode()).hexdigest()[:12] if private_key else "none", flush=True)
     with db() as c:
         c.executescript("""
             CREATE TABLE IF NOT EXISTS users(
@@ -245,7 +243,6 @@ def private_admin_metrics(request: Request):
     expected = os.getenv("AGCN_ADMIN_METRICS_SECRET", "")
     supplied = request.headers.get("X-AGCN-Internal-Key", "")
     if len(expected) < 40 or not hmac.compare_digest(supplied, expected):
-        print("AGCN_METRICS_REJECT", "expected_set" if len(expected)>=40 else "expected_missing", "header_present" if supplied else "header_missing", flush=True)
         raise HTTPException(404, "Não encontrado.")
     now = int(time.time())
     with db() as c:
