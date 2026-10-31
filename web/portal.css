@@ -55,3 +55,75 @@
 .galleryimg{animation:none}
 .galleryimg:first-child{opacity:1}
 }
+
+
+/* Navigation placement mirrors AGCN Live Games: header on desktop, bottom dock on mobile. */
+.top{position:sticky;top:0;z-index:50;background:rgba(11,17,29,.94);backdrop-filter:blur(16px)}
+.topinner{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:76px}
+.sitenav{display:flex;align-items:center;justify-content:center;gap:4px;padding:0;margin:0 auto}
+.sitenav a{padding:10px 13px;border-radius:10px;color:#b9c9df;min-width:0;font-size:13px;font-weight:700}
+.sitenav a:hover,.sitenav a[aria-current="page"]{background:#2381ff1e;color:#90c5ff}
+.agcn-mobile-nav{display:none}
+.agcn-mobile-nav svg{display:block;width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* Same 3D coverflow/depth animation as AGCN Games, recolored blue. */
+.screengallery.agcn-home-gallery{position:relative;width:min(100%,1100px);aspect-ratio:16/9;max-width:none;margin:0 auto}
+.agcn-home-gallery .agcn-showcase{
+  position:relative;width:100%;height:100%;overflow:hidden;
+  isolation:isolate;perspective:1150px;transform-style:preserve-3d;
+  background:transparent;border:0;border-radius:0;touch-action:pan-y;
+}
+.agcn-home-gallery .showcase-cover{
+  --flow-x:0%;--flow-y:0%;--flow-size:.5;--flow-turn:0deg;
+  position:absolute;display:block;left:50%;top:50%;width:72%;height:auto;
+  aspect-ratio:16/9;object-fit:contain;object-position:center;
+  border:0;border-radius:0;box-shadow:none;filter:none;background:transparent;
+  pointer-events:none;backface-visibility:hidden;transform-origin:50% 50%;
+  opacity:0;visibility:hidden;z-index:1;
+  transform:translate3d(calc(-50% + var(--flow-x)),calc(-50% + var(--flow-y)),0)
+    scale(var(--flow-size)) rotateY(var(--flow-turn));transition:none;
+}
+.agcn-home-gallery .agcn-showcase:not(.agcn-flow-ready) .showcase-cover:first-child{opacity:1;visibility:visible;--flow-size:1;z-index:7}
+.agcn-home-gallery .agcn-showcase.agcn-flow-ready .showcase-cover{
+  transition:transform 1000ms cubic-bezier(.22,.72,.18,1),
+    opacity 850ms ease, visibility 0s linear 1000ms;
+}
+.agcn-home-gallery .showcase-cover:is(
+  [data-flow-slot="center"],[data-flow-slot="previous"],[data-flow-slot="next"],
+  [data-flow-slot="previous-far"],[data-flow-slot="next-far"]
+){visibility:visible;transition-delay:0s}
+.agcn-home-gallery [data-flow-slot="center"]{--flow-x:0%;--flow-y:0%;--flow-size:1;--flow-turn:0deg;opacity:1;z-index:7}
+.agcn-home-gallery [data-flow-slot="previous"]{--flow-x:-55%;--flow-y:5%;--flow-size:.8;--flow-turn:24deg;opacity:.84;z-index:5}
+.agcn-home-gallery [data-flow-slot="next"]{--flow-x:55%;--flow-y:5%;--flow-size:.8;--flow-turn:-24deg;opacity:.84;z-index:5}
+.agcn-home-gallery [data-flow-slot="previous-far"]{--flow-x:-81%;--flow-y:-9%;--flow-size:.59;--flow-turn:32deg;opacity:.54;z-index:3}
+.agcn-home-gallery [data-flow-slot="next-far"]{--flow-x:81%;--flow-y:-9%;--flow-size:.59;--flow-turn:-32deg;opacity:.54;z-index:3}
+.agcn-home-gallery [data-flow-slot="off-left"]{--flow-x:-121%;--flow-y:-11%;--flow-size:.45;--flow-turn:38deg;opacity:0;z-index:1}
+.agcn-home-gallery [data-flow-slot="off-right"]{--flow-x:121%;--flow-y:-11%;--flow-size:.45;--flow-turn:-38deg;opacity:0;z-index:1}
+.agcn-home-gallery .showcase-cover[hidden]{display:none!important}
+.agcn-home-gallery .gallerynote{position:absolute;top:100%;left:0;right:0;font-size:11px;letter-spacing:.01em;color:#8196b2}
+.hero{padding-bottom:104px}
+@media(max-width:760px){
+  .topinner{min-height:66px}
+  .sitenav{display:none}
+  .agcn-mobile-nav{
+    display:flex;align-items:center;justify-content:space-around;
+    position:fixed;bottom:0;left:0;right:0;min-height:calc(64px + env(safe-area-inset-bottom));
+    padding:6px 8px calc(6px + env(safe-area-inset-bottom));
+    background:#0a0d15f2;backdrop-filter:blur(16px);
+    border-top:1px solid #2a3142;z-index:70;
+  }
+  .agcn-mobile-nav a{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    color:#b7bdcb;font:600 10px Inter,sans-serif;min-width:65px;padding:6px;border-radius:10px;
+  }
+  .agcn-mobile-nav a[aria-current="page"]{color:#8abfff;background:#1677ff22}
+  .foot{padding-bottom:calc(90px + env(safe-area-inset-bottom))}
+  .hero{padding-bottom:95px}
+  .agcn-home-gallery{width:100%;aspect-ratio:16/9}
+}
+@media(prefers-reduced-motion:reduce){
+ .agcn-home-gallery .showcase-cover{transition:none!important}
+}
+
+.agcn-home-gallery .showcase-cover{overflow:hidden;aspect-ratio:16/9;background:#f5f7fb;border:1px solid #d9e1ec;border-radius:10px;box-shadow:0 12px 38px #0007}
+.agcn-home-gallery .showcase-ui{display:block;border:0;max-width:none;position:absolute;inset:0;width:1600px;height:900px;transform-origin:0 0;transform:scale(var(--ui-scale,.5));pointer-events:none}

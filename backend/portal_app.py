@@ -106,7 +106,7 @@ def no_cache(resp):
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Content-Security-Policy"] = (
-        "default-src 'none'; style-src 'self'; img-src 'self' data:; "
+        "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; frame-src 'self'; "
         "form-action 'self' https://buy.infinitepay.io; base-uri 'none'; frame-ancestors 'none'"
     )
     return resp
@@ -121,26 +121,38 @@ def page(body, title="AGCN Live Voice", user=None):
         '<a class="loginbutton" href="/entrar">Entrar</a>'
         '<a class="pill small" href="/cadastro">Criar conta</a>'
     )
-    tabs = (
-        '<nav class="sitenav" aria-label="Navegação principal">'
-        '<a href="/">Início</a><a href="/planos">Planos</a>'
-        '<a href="/conta">Conta</a></nav>'
+    current_page = (
+        "inicio" if title.startswith("Início") else
+        "planos" if title.startswith("Planos") else
+        "conta" if any(word in title for word in ("conta", "Entrar", "Cadastro", "Criar")) else ""
     )
+    def active(name):
+        return ' aria-current="page"' if current_page == name else ''
+
     markup = f"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#090e18">
 <meta name="description" content="AGCN Live Voice — apresentador inteligente para transmissões ao vivo. Licenciamento e download para Windows.">
-<title>{clean(title)}</title><link rel="stylesheet" href="/assets/portal.css"></head>
+<title>{clean(title)}</title><link rel="stylesheet" href="/assets/portal.css">
+<script defer src="/assets/voice-carousel.js"></script></head>
 <body><header class="top"><div class="wrap topinner">
 <a class="brand" href="/" aria-label="AGCN Live Voice — início"><img class="brand-logo" src="/assets/logo.svg" alt="AGCN Live Voice"></a>
-<div class="top-actions">{action}</div></div>
-<div class="wrap">{tabs}</div></header>
+<nav class="sitenav" aria-label="Navegação principal">
+<a href="/"{active("inicio")}>Início</a>
+<a href="/planos"{active("planos")}>Planos</a>
+<a href="/conta"{active("conta")}>Conta</a>
+</nav>
+<div class="top-actions">{action}</div></div></header>
 <main>{body}</main><footer class="foot"><div class="wrap footerinner">
 <span>© AGCN Digital · AGCN Live Voice</span>
 <span>Apresentador inteligente · Software para Windows 64 bits</span>
-</div></footer></body></html>"""
+</div></footer>
+<nav class="agcn-mobile-nav" aria-label="Navegação móvel">
+<a href="/"{active("inicio")}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v11h-7v-7h-4v7H3z"/></svg>Início</a>
+<a href="/planos"{active("planos")}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="6" width="20" height="13" rx="3"/><path d="M2 11h20M6 15h5"/></svg>Planos</a>
+<a href="/conta"{active("conta")}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>Conta</a>
+</nav></body></html>"""
     return no_cache(HTMLResponse(markup))
-
 
 
 def get_user(request):
@@ -235,6 +247,26 @@ def css():
     return FileResponse(ROOT / "web" / "portal.css", media_type="text/css")
 
 
+@app.get("/assets/screenshots/{screen}.html")
+def screenshot_asset(screen: str):
+    if screen not in {"dashboard", "produto", "voz-audio"}:
+        raise HTTPException(404, "Prévia não encontrada.")
+    return FileResponse(
+        ROOT / "web" / "screenshots" / (screen + ".html"),
+        media_type="text/html",
+        headers={
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; object-src 'none'; base-uri 'none'",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "public, max-age=86400"
+        }
+    )
+
+
+@app.get("/assets/voice-carousel.js")
+def voice_carousel_script():
+    return FileResponse(ROOT / "web" / "voice-carousel.js", media_type="application/javascript")
+
+
 @app.get("/assets/logo.svg")
 def brand_logo():
     return FileResponse(ROOT / "web" / "logo.svg", media_type="image/svg+xml")
@@ -262,14 +294,13 @@ def home(request: Request):
   <span>WINDOWS 64 BITS</span><span>IA local no computador</span>
   <span>Integração TikTok LIVE</span><span>Voz neural</span>
 </div>
-<div class="screengallery" aria-label="Prévia das telas do programa AGCN Live Voice">
- <div class="galleryframe">
-  <img class="galleryimg" src="/assets/previews/dashboard.svg" alt="Dashboard do AGCN Live Voice em funcionamento" width="1600" height="900">
-  <img class="galleryimg" src="/assets/previews/produto.svg" alt="Tela de cadastro de produto com exemplo preenchido" width="1600" height="900" loading="lazy">
-  <img class="galleryimg" src="/assets/previews/voz-audio.svg" alt="Tela de configuração de voz e áudio" width="1600" height="900" loading="lazy">
+<div class="screengallery agcn-home-gallery" aria-label="Telas do AGCN Live Voice em roleta automática">
+ <div class="agcn-showcase" aria-label="Prévia das três telas do programa" aria-roledescription="carrossel automático">
+  <div class="showcase-cover" data-image="dashboard"><iframe class="showcase-ui" title="Dashboard em funcionamento" src="/assets/screenshots/dashboard.html" sandbox="" loading="eager" width="1600" height="900" tabindex="-1"></iframe></div>
+  <div class="showcase-cover" data-image="produto"><iframe class="showcase-ui" title="Produto cadastrado" src="/assets/screenshots/produto.html" sandbox="" loading="eager" width="1600" height="900" tabindex="-1"></iframe></div>
+  <div class="showcase-cover" data-image="voz-audio"><iframe class="showcase-ui" title="Voz e áudio" src="/assets/screenshots/voz-audio.html" sandbox="" loading="eager" width="1600" height="900" tabindex="-1"></iframe></div>
  </div>
- <div class="gallerydots" aria-hidden="true"><i></i><i></i><i></i></div>
- <p class="gallerynote">Prévias ilustrativas da interface do aplicativo para Windows.</p>
+ <p class="gallerynote">Prévias ilustrativas da interface do programa para Windows.</p>
 </div>
 </section>
 <section class="details"><div class="wrap"><span class="eyebrow">COMO FUNCIONA</span>
