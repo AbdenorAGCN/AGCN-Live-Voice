@@ -259,7 +259,7 @@ def home(request: Request):
 <p class="lead">AGCN Live Voice: um apresentador inteligente para ajudar você a acompanhar comentários, organizar produtos e conduzir suas transmissões ao vivo.</p>
 <a class="pill download-main" href="/download">Baixar AGCN Live Voice <span aria-hidden="true">↓</span></a>
 <div class="quickfeatures">
-  <span>Windows 64 bits</span><span>IA local no computador</span>
+  <span>WINDOWS 64 BITS</span><span>IA local no computador</span>
   <span>Integração TikTok LIVE</span><span>Voz neural</span>
 </div>
 <div class="screengallery" aria-label="Prévia das telas do programa AGCN Live Voice">
