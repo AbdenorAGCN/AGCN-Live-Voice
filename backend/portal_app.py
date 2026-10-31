@@ -43,6 +43,8 @@ def db():
 
 @app.on_event("startup")
 def init_database():
+    private_key = os.getenv("AGCN_ADMIN_METRICS_SECRET", "")
+    print("AGCN_PRIVATE_METRICS", "enabled" if len(private_key) >= 40 else "disabled", hashlib.sha256(private_key.encode()).hexdigest()[:12] if private_key else "none", flush=True)
     with db() as c:
         c.executescript("""
             CREATE TABLE IF NOT EXISTS users(
