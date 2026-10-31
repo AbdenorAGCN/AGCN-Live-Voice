@@ -55,3 +55,21 @@ def test_bad_password_and_duplicate_registration(client):
         "name": "Teste Nome", "email": "test@example.com", "password": "abcdefghij"
     })
     assert "já possui cadastro" in duplicate.text
+
+
+def test_navigation_plans_download_and_previews(client):
+    home = client.get("/")
+    assert home.status_code == 200
+    assert 'href="/planos"' in home.text
+    assert 'href="/conta"' in home.text
+    assert 'href="/download"' in home.text
+    assert 'screengallery' in home.text
+    assert client.get("/planos").status_code == 200
+    assert "49,90" in client.get("/planos").text
+    assert "Bem-vindo de volta" in client.get("/download").text
+    assert client.get("/assets/logo.svg").status_code == 200
+    for screen in ("dashboard", "produto", "voz-audio"):
+        response = client.get(f"/assets/previews/{screen}.svg")
+        assert response.status_code == 200
+        assert "<svg" in response.text
+    assert client.get("/assets/previews/nao-existe.svg").status_code == 404
