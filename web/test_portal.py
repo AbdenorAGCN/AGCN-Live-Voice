@@ -83,10 +83,11 @@ def test_game_style_mobile_nav_and_screenshot_carousel(client):
     assert 'href="/" aria-current="page"' in home.text
     assert 'class="agcn-showcase"' in home.text
     assert home.text.count('class="showcase-cover"') == 3
-    assert 'src="/assets/screenshots/dashboard.html"' in home.text
-    assert 'src="/assets/screenshots/produto.html"' in home.text
-    assert 'src="/assets/screenshots/voz-audio.html"' in home.text
-    assert 'sandbox=""' in home.text
+    assert 'src="/assets/screenshots/images/dashboard.webp"' in home.text
+    assert 'src="/assets/screenshots/images/produto.webp"' in home.text
+    assert 'src="/assets/screenshots/images/voz-audio.webp"' in home.text
+    assert home.text.count('class="showcase-image"') == 3
+    assert 'sandbox=""' not in home.text
     assert "frame-src 'self'" in home.headers["content-security-policy"]
     script = client.get("/assets/voice-carousel.js")
     assert script.status_code == 200
@@ -138,3 +139,13 @@ def test_plan_card_only_and_short_steps(client):
     assert "Escolha o plano e confira as condições." in home.text
     style = client.get("/assets/portal.css")
     assert "min-height:136px" in style.text
+
+
+def test_generated_screenshot_images(client):
+    for screen in ("dashboard", "produto", "voz-audio"):
+        response = client.get(f"/assets/screenshots/images/{screen}.webp")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("image/webp")
+        assert response.content.startswith(b"RIFF")
+        assert response.content[8:12] == b"WEBP"
+    assert client.get("/assets/screenshots/images/invalido.webp").status_code == 404

@@ -262,6 +262,17 @@ def screenshot_asset(screen: str):
     )
 
 
+@app.get("/assets/screenshots/images/{screen}.webp")
+def screenshot_image(screen: str):
+    if screen not in {"dashboard", "produto", "voz-audio"}:
+        raise HTTPException(404, "Imagem não encontrada.")
+    return FileResponse(
+        ROOT / "web" / "screenshots" / "images" / (screen + ".webp"),
+        media_type="image/webp",
+        headers={"Cache-Control": "public, max-age=604800"},
+    )
+
+
 @app.get("/assets/voice-carousel.js")
 def voice_carousel_script():
     return FileResponse(ROOT / "web" / "voice-carousel.js", media_type="application/javascript")
@@ -296,9 +307,9 @@ def home(request: Request):
 </div>
 <div class="screengallery agcn-home-gallery" aria-label="Telas do AGCN Live Voice em roleta automática">
  <div class="agcn-showcase" aria-label="Prévia das três telas do programa" aria-roledescription="carrossel automático">
-  <div class="showcase-cover" data-image="dashboard"><iframe class="showcase-ui" title="Dashboard em funcionamento" src="/assets/screenshots/dashboard.html" sandbox="" loading="eager" width="1600" height="900" tabindex="-1"></iframe></div>
-  <div class="showcase-cover" data-image="produto"><iframe class="showcase-ui" title="Produto cadastrado" src="/assets/screenshots/produto.html" sandbox="" loading="eager" width="1600" height="900" tabindex="-1"></iframe></div>
-  <div class="showcase-cover" data-image="voz-audio"><iframe class="showcase-ui" title="Voz e áudio" src="/assets/screenshots/voz-audio.html" sandbox="" loading="eager" width="1600" height="900" tabindex="-1"></iframe></div>
+  <div class="showcase-cover" data-image="dashboard"><img class="showcase-image" src="/assets/screenshots/images/dashboard.webp" alt="Dashboard em funcionamento — tela ilustrativa do AGCN Live Voice" loading="eager" decoding="async" width="1600" height="900"></div>
+  <div class="showcase-cover" data-image="produto"><img class="showcase-image" src="/assets/screenshots/images/produto.webp" alt="Produto cadastrado — tela ilustrativa do AGCN Live Voice" loading="eager" decoding="async" width="1600" height="900"></div>
+  <div class="showcase-cover" data-image="voz-audio"><img class="showcase-image" src="/assets/screenshots/images/voz-audio.webp" alt="Voz e áudio — tela ilustrativa do AGCN Live Voice" loading="eager" decoding="async" width="1600" height="900"></div>
  </div>
  <p class="gallerynote">Prévias ilustrativas da interface do programa para Windows.</p>
 </div>

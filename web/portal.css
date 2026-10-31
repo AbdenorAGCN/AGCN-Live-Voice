@@ -138,3 +138,7 @@
 .plans-page{min-height:calc(100dvh - 178px);padding:52px 0 65px;display:flex;align-items:center;justify-content:center}
 .plans-page .plans-centered{width:100%}
 @media(max-width:760px){.details{padding:33px 0 38px}.details .featuregrid{gap:9px;margin-top:15px}.details .feature{padding:15px 16px;min-height:auto}.details .feature h3{margin:8px 0 5px;font-size:15px}.details .feature p{font-size:12px}.plans-page{min-height:calc(100dvh - 167px - env(safe-area-inset-bottom));padding:35px 0 56px}}
+
+/* Real generated 16:9 screenshot images: preserve 3D AGCN Games coverflow. */
+.agcn-home-gallery .showcase-cover{background:transparent;border:0;border-radius:0;box-shadow:none}
+.agcn-home-gallery .showcase-image{display:block;width:100%;height:100%;object-fit:contain;object-position:center;border:0;border-radius:8px;background:transparent;pointer-events:none;user-select:none;-webkit-user-drag:none}
