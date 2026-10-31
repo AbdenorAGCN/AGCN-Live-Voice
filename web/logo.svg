@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="208" viewBox="0 0 620 208">
+<g transform="translate(8 5)">
+<ellipse cx="95" cy="89" rx="100" ry="36" transform="rotate(-31 95 89)" fill="none" stroke="#127cff" stroke-width="18"/>
+<path d="M18 142 L88 13 L145 137 L113 137 L87 75 L50 142 Z" fill="#fff" stroke="#dfe9f7" stroke-width="2"/>
+<path d="M60 146 L100 146 L122 189 L87 189 Z" fill="#fff"/>
+</g>
+<text x="157" y="115" fill="#fff" font-family="Arial Black,Segoe UI,Arial,sans-serif" font-style="italic" font-size="110" font-weight="900" letter-spacing="-10">GCN</text>
+<text x="212" y="188" fill="#1680ff" font-family="Arial Black,Segoe UI,Arial,sans-serif" font-style="italic" font-size="74" font-weight="900" letter-spacing="-6">LIVE VOICE</text>
+</svg>

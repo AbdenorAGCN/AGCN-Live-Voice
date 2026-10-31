@@ -114,22 +114,33 @@ def no_cache(resp):
 
 def page(body, title="AGCN Live Voice", user=None):
     customer = bool(user)
-    nav = (
-        '<a href="/conta">Minha conta</a><form method="post" action="/sair"><button class="navlink" type="submit">Sair</button></form>'
-        if customer else '<a href="/entrar">Entrar</a><a class="pill small" href="/cadastro">Criar conta</a>'
+    action = (
+        '<a class="loginbutton" href="/conta">Minha conta</a>'
+        '<form method="post" action="/sair"><button class="navlink" type="submit">Sair</button></form>'
+        if customer else
+        '<a class="loginbutton" href="/entrar">Entrar</a>'
+        '<a class="pill small" href="/cadastro">Criar conta</a>'
     )
-    initials = '<span class="mark"><b>A</b></span>'
+    tabs = (
+        '<nav class="sitenav" aria-label="Navegação principal">'
+        '<a href="/">Início</a><a href="/planos">Planos</a>'
+        '<a href="/conta">Conta</a></nav>'
+    )
     markup = f"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#090e18">
 <meta name="description" content="AGCN Live Voice — apresentador inteligente para transmissões ao vivo. Licenciamento e download para Windows.">
 <title>{clean(title)}</title><link rel="stylesheet" href="/assets/portal.css"></head>
-<body><header class="top"><div class="wrap topinner"><a class="brand" href="/">{initials}
-<span><strong>AGCN</strong><small>LIVE VOICE</small></span></a><nav>{nav}</nav></div></header>
+<body><header class="top"><div class="wrap topinner">
+<a class="brand" href="/" aria-label="AGCN Live Voice — início"><img class="brand-logo" src="/assets/logo.svg" alt="AGCN Live Voice"></a>
+<div class="top-actions">{action}</div></div>
+<div class="wrap">{tabs}</div></header>
 <main>{body}</main><footer class="foot"><div class="wrap footerinner">
-<span>© AGCN Digital · AGCN Live Voice</span><span>Software para Windows 64 bits · Atendimento e condições comerciais disponíveis antes da compra.</span>
+<span>© AGCN Digital · AGCN Live Voice</span>
+<span>Apresentador inteligente · Software para Windows 64 bits</span>
 </div></footer></body></html>"""
     return no_cache(HTMLResponse(markup))
+
 
 
 def get_user(request):
@@ -224,31 +235,79 @@ def css():
     return FileResponse(ROOT / "web" / "portal.css", media_type="text/css")
 
 
+@app.get("/assets/logo.svg")
+def brand_logo():
+    return FileResponse(ROOT / "web" / "logo.svg", media_type="image/svg+xml")
+
+
+@app.get("/assets/previews/{screen}.svg")
+def preview(screen: str):
+    if screen not in {"dashboard", "produto", "voz-audio"}:
+        raise HTTPException(404, "Imagem não encontrada.")
+    return FileResponse(ROOT / "web" / "previews" / (screen + ".svg"), media_type="image/svg+xml")
+
+
+@app.get("/download")
+def download_entry(request: Request):
+    return RedirectResponse("/conta" if get_user(request) else "/entrar", 303)
+
+
 @app.get("/")
 def home(request: Request):
-    user = get_user(request)
-    if user:
-        action = '<a class="pill" href="/conta">Acessar minha conta <span>↗</span></a>'
-    else:
-        action = '<a class="pill" href="/cadastro">Começar agora <span>↗</span></a><a class="quiet" href="/entrar">Já tenho uma conta</a>'
-    s = settings()
-    amount = money(s["price"]) if s["price"] else "Em breve"
-    term = f"{s['days']} dias de acesso" if s["days"] else "Duração a definir"
-    body = f"""<section class="hero wrap"><div class="eyebrow"><span class="dot"></span> SOFTWARE PARA WINDOWS</div>
+    body = """<section class="hero wrap">
 <h1>Sua LIVE com mais<br><em>inteligência e presença.</em></h1>
 <p class="lead">AGCN Live Voice: um apresentador inteligente para ajudar você a acompanhar comentários, organizar produtos e conduzir suas transmissões ao vivo.</p>
-<div class="actions">{action}</div><div class="hero-rule"></div>
-<div class="stats"><div><strong>Brain local</strong><span>Processamento no seu PC</span></div><div><strong>Voz neural</strong><span>Geração de áudio no Windows</span></div><div><strong>Windows 64 bits</strong><span>Aplicativo para computador</span></div></div>
-</section><section class="details"><div class="wrap"><span class="eyebrow">COMO FUNCIONA</span>
-<h2>Tudo em um só lugar.</h2><div class="featuregrid">
-<div class="feature"><span class="number">01</span><h3>Crie seu cadastro</h3><p>Acesse uma área exclusiva para acompanhar sua licença.</p></div>
-<div class="feature"><span class="number">02</span><h3>Adquira sua licença</h3><p>Pagamento seguro pelo checkout da InfinitePay, quando as vendas estiverem abertas.</p></div>
-<div class="feature"><span class="number">03</span><h3>Instale no Windows</h3><p>Após aprovação do pagamento, o instalador é liberado na sua conta quando publicado.</p></div>
-</div></div></section>
-<section class="price wrap"><div><span class="eyebrow">LICENCIAMENTO</span><h2>Seu espaço de trabalho.<br>Seu assistente inteligente.</h2><p>O software executa seus modelos de IA no computador. O site é utilizado para cadastro, licenciamento e downloads.</p></div>
-<div class="pricebox"><span>LICENÇA AGCN LIVE VOICE</span><strong>{amount}</strong><small>{term}</small>
-<a class="pill full" href="/cadastro">Criar conta</a><p>Os valores e condições finais serão apresentados antes da contratação.</p></div></section>"""
-    return page(body, user=user)
+<a class="pill download-main" href="/download">Baixar AGCN Live Voice <span aria-hidden="true">↓</span></a>
+<div class="quickfeatures">
+  <span>Windows 64 bits</span><span>IA local no computador</span>
+  <span>Integração TikTok LIVE</span><span>Voz neural</span>
+</div>
+<div class="screengallery" aria-label="Prévia das telas do programa AGCN Live Voice">
+ <div class="galleryframe">
+  <img class="galleryimg" src="/assets/previews/dashboard.svg" alt="Dashboard do AGCN Live Voice em funcionamento" width="1600" height="900">
+  <img class="galleryimg" src="/assets/previews/produto.svg" alt="Tela de cadastro de produto com exemplo preenchido" width="1600" height="900" loading="lazy">
+  <img class="galleryimg" src="/assets/previews/voz-audio.svg" alt="Tela de configuração de voz e áudio" width="1600" height="900" loading="lazy">
+ </div>
+ <div class="gallerydots" aria-hidden="true"><i></i><i></i><i></i></div>
+ <p class="gallerynote">Prévias ilustrativas da interface do aplicativo para Windows.</p>
+</div>
+</section>
+<section class="details"><div class="wrap"><span class="eyebrow">COMO FUNCIONA</span>
+<div class="featuregrid">
+<div class="feature"><span class="number">01</span><h3>Crie seu cadastro</h3><p>Acesse sua área exclusiva para acompanhar sua licença.</p></div>
+<div class="feature"><span class="number">02</span><h3>Adquira sua licença</h3><p>Consulte o plano e as condições disponíveis antes de contratar.</p></div>
+<div class="feature"><span class="number">03</span><h3>Instale no Windows</h3><p>Após a liberação, baixe o instalador pela sua conta.</p></div>
+</div></div></section>"""
+    return page(body, title="Início — AGCN Live Voice", user=get_user(request))
+
+
+@app.get("/planos")
+def plans(request: Request):
+    s = settings()
+    price = money(s["price"]) if s["price"] else "R$ 49,90"
+    term = f"{s['days']} dias de acesso" if s["days"] else "Período informado antes da compra"
+    customer = get_user(request)
+    if ready_to_sell():
+        action = (
+            '<a class="pill full" href="/conta">Adquirir pela minha conta</a>'
+            if customer else '<a class="pill full" href="/cadastro">Criar conta para contratar</a>'
+        )
+        note = "Confira os detalhes e confirme o pagamento pela sua área de cliente."
+    else:
+        action = (
+            '<a class="pill full" href="/conta">Consultar minha conta</a>'
+            if customer else '<a class="pill full" href="/cadastro">Criar conta</a>'
+        )
+        note = "Checkout em preparação. O valor e a duração serão confirmados antes da contratação."
+    body = f"""<section class="plans-page wrap">
+<div class="eyebrow">PLANOS</div>
+<h1>Escolha o AGCN Live Voice.</h1>
+<div class="plans-centered"><div class="pricebox"><span>LICENÇA AGCN LIVE VOICE</span>
+<strong>{price}</strong><small>{clean(term)}</small>
+<p>Assistente inteligente para lives com IA local, voz neural e gerenciamento de produtos.</p>
+{action}<p>{note}</p></div></div></section>"""
+    return page(body, title="Planos — AGCN Live Voice", user=customer)
+
 
 
 def auth_form(kind, error=""):
