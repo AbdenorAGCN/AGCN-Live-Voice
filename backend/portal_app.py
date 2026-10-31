@@ -237,6 +237,41 @@ async def origin_guard(request: Request, call_next):
     return no_cache(resp)
 
 
+@app.get("/internal/admin/metrics")
+def private_admin_metrics(request: Request):
+    """Server-to-server read-only aggregate counts. Never return customer identity."""
+    expected = os.getenv("AGCN_ADMIN_METRICS_SECRET", "")
+    supplied = request.headers.get("X-AGCN-Internal-Key", "")
+    if len(expected) < 40 or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(404, "Não encontrado.")
+    now = int(time.time())
+    with db() as c:
+        users = c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        paid_people = c.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM orders WHERE status='paid'"
+        ).fetchone()[0]
+        paid_orders = c.execute("SELECT COUNT(*) FROM orders WHERE status='paid'").fetchone()[0]
+        gross = c.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status='paid'"
+        ).fetchone()[0]
+        pending = c.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status='pending'"
+        ).fetchone()[0]
+        pending_count = c.execute(
+            "SELECT COUNT(*) FROM orders WHERE status='pending'"
+        ).fetchone()[0]
+        active = c.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM licenses WHERE expires_at > ?", (now,)
+        ).fetchone()[0]
+    return no_cache(JSONResponse({
+        "service": "voice", "accounts": users, "paid": paid_people,
+        "unpaid_accounts": max(0, users - paid_people), "active_licenses": active,
+        "approved_orders": paid_orders, "gross_confirmed_cents": gross,
+        "pending_cents": pending, "pending_checkouts": pending_count,
+        "commercial_ready": ready_to_sell(), "unit": "BRL_cents",
+    }))
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "application": "AGCN Live Voice customer portal"}

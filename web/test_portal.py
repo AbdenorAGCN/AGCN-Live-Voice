@@ -149,3 +149,23 @@ def test_generated_screenshot_images(client):
         assert response.content.startswith(b"RIFF")
         assert response.content[8:12] == b"WEBP"
     assert client.get("/assets/screenshots/images/invalido.webp").status_code == 404
+
+
+def test_private_admin_aggregate_metrics(client, monkeypatch):
+    monkeypatch.setenv("AGCN_ADMIN_METRICS_SECRET", "a" * 48)
+    assert client.get("/internal/admin/metrics").status_code == 404
+    assert client.get("/internal/admin/metrics", headers={"X-AGCN-Internal-Key": "wrong"}).status_code == 404
+    headers = {"X-AGCN-Internal-Key": "a" * 48}
+    before = client.get("/internal/admin/metrics", headers=headers)
+    assert before.status_code == 200
+    assert before.json()["accounts"] == 0
+    assert "email" not in before.text
+    client.post("/cadastro", headers={"Origin": portal.PUBLIC}, data={
+        "name": "Cliente Teste", "email": "uma@exemplo.com", "password": "123456"
+    })
+    after = client.get("/internal/admin/metrics", headers=headers).json()
+    assert after["accounts"] == 1
+    assert after["gross_confirmed_cents"] == 0
+    assert after["paid"] == 0
+    assert after["unpaid_accounts"] == 1
+    assert after["commercial_ready"] is False
