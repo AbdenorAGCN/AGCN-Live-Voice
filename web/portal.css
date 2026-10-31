@@ -127,3 +127,14 @@
 
 .agcn-home-gallery .showcase-cover{overflow:hidden;aspect-ratio:16/9;background:#f5f7fb;border:1px solid #d9e1ec;border-radius:10px;box-shadow:0 12px 38px #0007}
 .agcn-home-gallery .showcase-ui{display:block;border:0;max-width:none;position:absolute;inset:0;width:1600px;height:900px;transform-origin:0 0;transform:scale(var(--ui-scale,.5));pointer-events:none}
+
+/* Compact AGCN Live Voice steps and plan — 31 Oct 2026 */
+.details{padding:44px 0 54px}
+.details .featuregrid{gap:12px;margin-top:19px}
+.details .feature{padding:19px 20px;min-height:136px;border-radius:13px}
+.details .number{font-size:12px;line-height:1.2}
+.details .feature h3{margin:12px 0 6px;font-size:16px;line-height:1.25}
+.details .feature p{font-size:12px;line-height:1.45}
+.plans-page{min-height:calc(100dvh - 178px);padding:52px 0 65px;display:flex;align-items:center;justify-content:center}
+.plans-page .plans-centered{width:100%}
+@media(max-width:760px){.details{padding:33px 0 38px}.details .featuregrid{gap:9px;margin-top:15px}.details .feature{padding:15px 16px;min-height:auto}.details .feature h3{margin:8px 0 5px;font-size:15px}.details .feature p{font-size:12px}.plans-page{min-height:calc(100dvh - 167px - env(safe-area-inset-bottom));padding:35px 0 56px}}

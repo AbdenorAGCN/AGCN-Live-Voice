@@ -305,9 +305,9 @@ def home(request: Request):
 </section>
 <section class="details"><div class="wrap"><span class="eyebrow">COMO FUNCIONA</span>
 <div class="featuregrid">
-<div class="feature"><span class="number">01</span><h3>Crie seu cadastro</h3><p>Acesse sua área exclusiva para acompanhar sua licença.</p></div>
-<div class="feature"><span class="number">02</span><h3>Adquira sua licença</h3><p>Consulte o plano e as condições disponíveis antes de contratar.</p></div>
-<div class="feature"><span class="number">03</span><h3>Instale no Windows</h3><p>Após a liberação, baixe o instalador pela sua conta.</p></div>
+<div class="feature"><span class="number">01</span><h3>Crie seu cadastro</h3><p>Acompanhe sua licença na sua conta.</p></div>
+<div class="feature"><span class="number">02</span><h3>Adquira sua licença</h3><p>Escolha o plano e confira as condições.</p></div>
+<div class="feature"><span class="number">03</span><h3>Instale no Windows</h3><p>Baixe o aplicativo na sua conta quando liberado.</p></div>
 </div></div></section>"""
     return page(body, title="Início — AGCN Live Voice", user=get_user(request))
 
@@ -331,8 +331,6 @@ def plans(request: Request):
         )
         note = "Checkout em preparação. O valor e a duração serão confirmados antes da contratação."
     body = f"""<section class="plans-page wrap">
-<div class="eyebrow">PLANOS</div>
-<h1>Escolha o AGCN Live Voice.</h1>
 <div class="plans-centered"><div class="pricebox"><span>LICENÇA AGCN LIVE VOICE</span>
 <strong>{price}</strong><small>{clean(term)}</small>
 <p>Assistente inteligente para lives com IA local, voz neural e gerenciamento de produtos.</p>
@@ -350,10 +348,12 @@ def auth_form(kind, error=""):
     error_html = f'<div class="error" role="alert">{clean(error)}</div>' if error else ""
     footer = ('Já tem conta? <a href="/entrar">Entrar</a>' if signup
               else 'Ainda não tem conta? <a href="/cadastro">Criar conta</a>')
+    password_min = 'minlength="6" ' if signup else ""
+    password_hint = "Mínimo de 6 caracteres" if signup else "Sua senha"
     return f"""<section class="auth wrap"><div class="authcard"><div class="eyebrow">AGCN LIVE VOICE</div><h1>{title}</h1>
 <p>{subtitle}</p>{error_html}<form method="post" action="/{kind}">
 {fields}<label>E-mail<input name="email" type="email" required maxlength="254" autocomplete="email" placeholder="voce@exemplo.com"></label>
-<label>Senha<input name="password" type="password" minlength="10" maxlength="128" required autocomplete="{ 'new-password' if signup else 'current-password'}" placeholder="Mínimo de 10 caracteres"></label>
+<label>Senha<input name="password" type="password" {password_min}maxlength="128" required autocomplete="{ 'new-password' if signup else 'current-password'}" placeholder="{password_hint}"></label>
 <button class="pill full" type="submit">{'Criar conta' if signup else 'Entrar'}</button></form>
 <div class="formfoot">{footer}</div></div></section>"""
 
@@ -373,8 +373,8 @@ async def signup(request: Request):
     email = data.get("email", "").strip().lower()
     password = data.get("password", "")
     if not (2 <= len(name) <= 100 and re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,180}\.[^@\s]+", email)
-            and 10 <= len(password) <= 128):
-        return page(auth_form("cadastro", "Confira o nome, e-mail e a senha (mínimo de 10 caracteres)."), "Cadastro")
+            and 6 <= len(password) <= 128):
+        return page(auth_form("cadastro", "Confira o nome, e-mail e a senha (mínimo de 6 caracteres)."), "Cadastro")
     try:
         with db() as c:
             cur = c.execute(

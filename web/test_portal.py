@@ -100,3 +100,41 @@ def test_game_style_mobile_nav_and_screenshot_carousel(client):
     assert client.get("/assets/screenshots/invalid.html").status_code == 404
     assert 'href="/planos" aria-current="page"' in client.get("/planos").text
     assert 'href="/conta" aria-current="page"' in client.get("/conta").text
+
+
+def test_signup_six_character_minimum_and_no_login_minlength(client):
+    form = client.get("/cadastro")
+    assert 'minlength="6"' in form.text
+    assert "Mínimo de 6 caracteres" in form.text
+    assert 'minlength="6"' not in client.get("/entrar").text
+    short = client.post("/cadastro", headers={"Origin": portal.PUBLIC}, data={
+        "name": "Cliente Exemplo", "email": "short@exemplo.com", "password": "abcde"
+    })
+    assert short.status_code == 200
+    assert "mínimo de 6 caracteres" in short.text
+    assert client.get("/conta").text.find("Bem-vindo de volta") >= 0
+    good = client.post("/cadastro", headers={"Origin": portal.PUBLIC}, data={
+        "name": "Cliente Exemplo", "email": "six@exemplo.com", "password": "abc123"
+    })
+    assert good.status_code == 200
+    assert "Sem licença ativa" in good.text
+    client.post("/sair", headers={"Origin": portal.PUBLIC})
+    login = client.post("/entrar", headers={"Origin": portal.PUBLIC}, data={
+        "email": "six@exemplo.com", "password": "abc123"
+    })
+    assert login.status_code == 200
+    assert "Sem licença ativa" in login.text
+
+
+def test_plan_card_only_and_short_steps(client):
+    plans = client.get("/planos")
+    assert plans.status_code == 200
+    assert "LICENÇA AGCN LIVE VOICE" in plans.text
+    assert "Escolha o AGCN Live Voice." not in plans.text
+    assert '<div class="eyebrow">PLANOS</div>' not in plans.text
+    home = client.get("/")
+    assert home.text.count('class="feature"') == 3
+    assert "Acompanhe sua licença na sua conta." in home.text
+    assert "Escolha o plano e confira as condições." in home.text
+    style = client.get("/assets/portal.css")
+    assert "min-height:136px" in style.text
